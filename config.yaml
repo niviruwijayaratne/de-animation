@@ -1,7 +1,7 @@
 ioParams:
   inputPath: ./inputs/guitar.mov
   outputPath: final_guitar.mov
-  intermediateResults: True
+  intermediateResults: False
 
 featureParams:
   maxCorners: 150
