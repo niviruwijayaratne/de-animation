@@ -1,0 +1,14 @@
+ioParams:
+  inputPath: ./inputs/guitar.mov
+  outputPath: final_guitar.mov
+  intermediateResults: True
+
+featureParams:
+  maxCorners: 150
+  qualityLevel: 0.01
+  minDistance: 10
+
+trackingParams:
+  winSize: !!python/tuple [15, 15]
+  maxLevel: !!python/int 2
+  criteria: !!python/tuple [2, 10, 0.03]
