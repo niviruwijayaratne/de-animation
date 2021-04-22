@@ -71,6 +71,14 @@ class Tracker():
     def construct_table(self):
         pass
 
+class TrackTable():
+    def __init__(self, coords1):
+        self.coords = {}
+        self.anchor_tracks = {}
+        self.floating_tracks = {}
+    
+    def 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -83,6 +91,9 @@ def main():
 
     tracker = Tracker(config)
     tracker.track_features()
+
+
+
 
 if __name__ == '__main__':
     main()
