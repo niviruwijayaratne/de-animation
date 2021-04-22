@@ -68,6 +68,8 @@ class Tracker():
         if writer:
             writer.release()
 
+    def construct_table(self):
+        pass
 
 def main():
     parser = argparse.ArgumentParser()
@@ -81,9 +83,6 @@ def main():
 
     tracker = Tracker(config)
     tracker.track_features()
-
-
-
 
 if __name__ == '__main__':
     main()
