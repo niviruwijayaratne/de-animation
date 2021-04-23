@@ -23,6 +23,8 @@ class StrokeCanvas():
         self.r = {}
         self.g = {}
         self.b = {}
+        self._id = None
+        self.shape0 = None
         self.set_dims()
         self.create_widgets()
         
@@ -66,6 +68,9 @@ class StrokeCanvas():
     def clear_canvas(self):
         for line in self.drawings:
             self.canvas.delete(line)
+        self.r = {}
+        self.g = {}
+        self.b = {}
 
     def reset(self, e):
         self.x0 = None
@@ -84,17 +89,30 @@ class StrokeCanvas():
             out_canvas = "results/canvas.png"
             self.export_canvas.save(out_canvas)
             mask = np.zeros((self.im.height(), self.im.width()))
-            mask = np.dstack([mask, mask, mask])
-            x_s = (self.canvas.winfo_screenwidth() + 250)//2 - self.im.width()//2
+            coords = self.canvas.coords(self._id)
+            x_s = int(coords[0] - self.im.width()//2)
+            if x_s < 0:
+                x_s = 0
             x_f = x_s + self.im.width()
-            y_s = self.canvas.winfo_screenheight()//2 - self.im.height()//2
+
+            y_s = int(coords[1] - self.im.height()//2)
+            if y_s < 0:
+                y_s = 0
             y_f = y_s + self.im.height()
+            
             strokes = cv2.imread(out_canvas)
-            mask[np.where(strokes[y_s:, x_s:])[:2]] = 1
+            mask[np.where(strokes[y_s:y_f, x_s:x_f])[:2]] = 1
+            mask = np.dstack([mask, mask, mask])
             strokes = np.multiply(mask, strokes[y_s:y_f, x_s: x_f])
             im = ImageTk.getimage(self.im)
             im = cv2.cvtColor(np.array(im), cv2.COLOR_RGBA2RGB)
-            out_image = strokes + cv2.cvtColor(np.multiply(np.logical_not(mask), im).astype(np.uint8), cv2.COLOR_BGR2RGB)
+            im_copy = im.copy()
+            im_copy = strokes + cv2.cvtColor(np.multiply(np.logical_not(mask), im).astype(np.uint8), cv2.COLOR_BGR2RGB)
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+            out_image = cv2.addWeighted(im_copy.astype(np.uint8), 0.4, im.astype(np.uint8), 1 - 0.4, 0)
+            print(self.shape0)
+            r = self.shape0[0]/out_image.shape[0]
+            out_image = cv2.resize(out_image, (self.shape0[1], self.shape0[0]), interpolation=cv2.INTER_AREA)
             cv2.imwrite('results/out_composite.jpg', out_image)
             tkinter.messagebox.showinfo("Success", "Image Saved")
         except Exception as e:
@@ -110,15 +128,23 @@ class StrokeCanvas():
         self.canvas.update()
 
     def select_image(self):
-        try:
-            im = filedialog.askopenfilename()
-            self.im = ImageTk.PhotoImage(Image.open(im))
-            self.canvas.create_image((self.canvas.winfo_screenwidth() + 250)/2, self.canvas.winfo_screenheight()/2, anchor=CENTER, image=self.im)
-            self.canvas.update()
-            self.export_canvas = Image.new('RGB', (2560, 1600), (0, 0, 0))
-            self.export_drawer = ImageDraw.Draw(self.export_canvas)
-        except:
-            tkinter.messagebox.showinfo("Error", "No Image Selected")
+        # try:
+        im = filedialog.askopenfilename()
+        self.im = ImageTk.PhotoImage(Image.open(im))
+        h = self.im.height()
+        w = self.im.width()
+        self.shape0 = [h, w]
+        if self.im.height() > 1000:
+            im = np.array(ImageTk.getimage(self.im))
+            r = 1000/float(im.shape[0])
+            dim = (int(im.shape[1]*r), 1000)
+            self.im = ImageTk.PhotoImage(Image.fromarray(cv2.resize(np.array(im).astype(np.uint8), dim, interpolation=cv2.INTER_AREA)))
+        self._id = self.canvas.create_image((self.canvas.winfo_screenwidth() + 250)//2, self.canvas.winfo_screenheight()//2, anchor=CENTER, image=self.im)
+        self.canvas.update()
+        self.export_canvas = Image.new('RGB', (2560, 1600), (0, 0, 0))
+        self.export_drawer = ImageDraw.Draw(self.export_canvas)
+        # except:
+            # tkinter.messagebox.showinfo("Error", "No Image Selected")
 
     def choose_red(self):
 	    self.pen_color = 'red'
@@ -142,10 +168,7 @@ class StrokeCanvas():
 
         blue = TkinterCustomButton(text="", width=50, height=50, fg_color="blue", corner_radius=10, hover_color="blue", bg_color="white", command=self.choose_blue)
         blue_window = self.canvas.create_window(250/2 + 60, 200, anchor=CENTER, window=blue)
-		
-        # undo = TkinterCustomButton(text="Undo", corner_radius=10, command=self.undo, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
-        # undo_window = self.canvas.create_window(250/2, 400, anchor=CENTER, window=undo)
-
+	
         clear_canvas = TkinterCustomButton(text="Clear Canvas", corner_radius=10, command=self.clear_canvas, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
         clear_canvas_window = self.canvas.create_window(250/2, 300, anchor=CENTER, window=clear_canvas)
 
@@ -155,9 +178,6 @@ class StrokeCanvas():
 
         t = TkinterCustomButton(text="Export Image", corner_radius=10, command=self.save_image, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
         tt = self.canvas.create_window(250/2, 700, anchor=CENTER, window=t)
-
-
-
 
 class TkinterCustomButton(tkinter.Frame):
     """ tkinter custom button with border, rounded corners and hover effect
