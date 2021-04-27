@@ -1,3 +1,4 @@
+#weight fuunction
 import numpy as np
 def compute_weight_matrix(input_matrix):
     row, col = input_matrix.shape
