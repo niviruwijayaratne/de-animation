@@ -15,14 +15,17 @@ from math import sqrt
 #l: weighting function 
 
 def energy_function_lsq(quad_matrix, num_t, num_s, v_map, v, w, ka, l):
-
-    #ADD 2*num_s*8*num_t ROWS WITH 0 in K_a
-
     
     #2*num_s*num_t -> E_a: each s has 4 x coord weights and 4 y coord weights (each set of weights has a row)..total of t frames
     #2*num_s*8*num_t -> E_s: each s has 4 points associated with it (quad), each point has 2 coordinates (x coord, y coord), each coord is part of 2 equations
     ea_rows = 2*num_s*num_t
     es_rows = 4*2*2*num_s*num_t
+
+    #Generate new K_a matrix with dimensions ea_rows+es_rows x 1. First E_a rows in K_a should match input. The rest should be 0
+    ka_final = np.zeros((ea_rows+es_rows,1))
+
+    for i in range(ea_rows):
+        ka_final[i] = ka[i]
 
     #new matrix that will be A in Ax=b
     new = np.zeros((ea_rows+es_rows, len(v)))
@@ -184,7 +187,7 @@ def energy_function_lsq(quad_matrix, num_t, num_s, v_map, v, w, ka, l):
     
     new_w = scipy.sparse.lil_matrix(new, dtype='double')
 
-    v_prime = scipy.sparse.linalg.lsqr(new_w.tocsr(), ka); # solve w/ csr
+    v_prime = scipy.sparse.linalg.lsqr(new_w.tocsr(), ka_final); # solve w/ csr
     v_prime = v_prime[0]
 
 
