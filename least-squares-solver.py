@@ -14,7 +14,7 @@ from math import sqrt
 #ka: vector with 2*num_s*num_t rows, each entry corresponding to the x/y coordinate of an anchor feature
 #l: weighting function 
 
-def energy_function_lsq(quad_matrix, num_t, num_s, v_map, v, w, ka, l):
+def energy_function_lsq(quad_matrix, num_t, num_s, v, w, ka, l):
     
     #2*num_s*num_t -> E_a: each s has 4 x coord weights and 4 y coord weights (each set of weights has a row)..total of t frames
     #2*num_s*8*num_t -> E_s: each s has 4 points associated with it (quad), each point has 2 coordinates (x coord, y coord), each coord is part of 2 equations
@@ -105,8 +105,12 @@ def energy_function_lsq(quad_matrix, num_t, num_s, v_map, v, w, ka, l):
             v3 = np.array([x3,y3])
             v4 = np.array([x4,y4])
             
-            combos = [(v1,v3,v2), (v1,v3,v4), (v2,v4,v1), (v2,v4,v3), (v3,v1,v4), (v3,v1,v2), (v4,v2,v3), (v4,v2,v1)]
-            
+            #ex: solving for v1 using v4 and v3 where v4 is vertex opposite hypotenuse
+            combos = [(v1,v4,v3), (v1,v2,v3), (v2,v1,v4), (v2,v3,v4), (v3,v4,v1), (v3,v2,v1), (v4,v3,v2), (v4,v1,v2)]
+            # top left: v1
+            # top right: v2
+            # bottom right: v3
+
             for j in combos:
                 x_coord = j[0][0]
                 y_coord = j[0][1]
