@@ -57,7 +57,6 @@ class Tracker():
             ret, frame = vid.read() 
             if frame is None:
                 break
-
             feature_tracks[frame_count] = np.zeros((corners.shape[0], 2))
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             new_corners, exists, error = cv2.calcOpticalFlowPyrLK(start_gray, frame_gray, old_corners, None, **self.trackingParams)
@@ -180,7 +179,7 @@ class Tracker():
     def get_weights(self, feature_table, quads, quad_indices, vertices):
         '''
         Returns num_frames x num_features x 2x4 where each index in a row corresponds to a 2x4 array where the first row contains the weights 
-        and the second row contains the point indices in an array that is a column vector of self.xy_pairs repeated t times
+        and the second row contains the point indices in an array that is a 2-column matrix of self.xy_pairs repeated t times in [tl, tr, bl, br] order
         '''
         features = feature_table.transpose(1, 0, 2)
         vertices = vertices.reshape(-1, 2)
