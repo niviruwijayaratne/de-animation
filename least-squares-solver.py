@@ -5,6 +5,7 @@ import cv2
 from math import sqrt
 from klt import Tracker
 import yaml
+import argparse
 
 #INPUTS
 #quad_matrix: quads enclosing s where points are in order top left, top right, bottom right, bottom left s*t x 4
@@ -35,7 +36,6 @@ class LeastSquaresSolver:
     def __init__(self, feature_table, vertices, weights_and_verts):
         self.ka, self.vertices, self.weights_and_verts = self.pre_process(feature_table, vertices, weights_and_verts)
         
-
     def pre_process(self, feature_table, vertices, weights_and_verts):
         K_a = feature_table.transpose(1, 0, 2)[0].reshape(-1, 1)
         K_a = np.vstack([K_a for i in range(feature_table.shape[1])])
@@ -55,11 +55,7 @@ class LeastSquaresSolver:
         weights_and_vert_idxs[y_coords, 1, :] += 1
         return K_a, vertices, weights_and_vert_idxs
 
-    def energy_function_lsq(self):
-        pass
     def energy_function_lsq(self, quad_matrix, num_t, num_s, v, w, ka, l=None):
-    
-
         #2*num_s*num_t -> E_a: each s has 4 x coord weights and 4 y coord weights (each set of weights has a row)..total of t frames
         #2*num_s*8*num_t -> E_s: each s has 4 points associated with it (quad), each point has 2 coordinates (x coord, y coord), each coord is part of 2 equations
         ea_rows = 2*num_s*num_t
@@ -78,16 +74,6 @@ class LeastSquaresSolver:
             for j in range(quad_matrix.shape[1]):
                 vertex_map[cnt] = tuple(quad_matrix[i][j])
                 cnt += 1
-        
-        #map each vertex in 64x32 mesh to a vertex number
-        # vertex_map={}
-        # count = 0
-        # for i in range(65):
-        #     for j in range(33):
-        #         vertex_map[count] = [j,i]
-        #         count += 1
-
-
         #using weights and their coordinates from w, construct a new w that has weights in the correct places 
         #with the correct mappings --> E_a
         for i in range(0,w.shape[0], 2):
@@ -113,10 +99,7 @@ class LeastSquaresSolver:
                     else:  
                         new[i,vertex_num*2] = weight_x
                         new[i+1,vertex_num*2+1] = weight_y
-
-
         # r90 = np.array([[0,1],[-1,0]])
-
         #helps gets index of row in new matrix where values should be filled in
         count = 0
         ea_offset = 2*num_s*num_t
@@ -133,7 +116,6 @@ class LeastSquaresSolver:
 
             x4 = quad_matrix[i][3][0]
             y4 = quad_matrix[i][3][1]
-            
             
             v1 = np.array([x1, y1])
             v2 = np.array([x2,y2])
@@ -229,21 +211,23 @@ class LeastSquaresSolver:
         v_prime = v_prime[0]
 
 def main():
-    with open('config.yaml', 'r') as f:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config", required=True, default="./config.yaml", 
+        help="Path to config file")
+    
+    args = parser.parse_args()
+    with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     tracker = Tracker(config)
-    feature_table = tracker.track_features()
-    vertices, quads, quad_dict = tracker.get_mesh() #all x,y pairs, all quads, dictionary where key = vertex.tobytes(), value = indices of quads in quads it belongs to
-    quad_indices = tracker.search_quads(feature_table, quad_dict) #indices of each quad to be solved for in quads
-    weights_and_verts = tracker.get_weights(feature_table, quads, quad_indices, vertices) #list of weights and their corresponding vertices
+    feature_table, vertices, quads, quad_dict, quad_indices, weights_and_verts = tracker.run()
     ka = feature_table.transpose(1, 0, 2)[0]
     quad_matrix = quads
     num_t = ka.shape[0]
     num_s = ka.shape[1]
-
     lsq_solver = LeastSquaresSolver(feature_table, vertices, weights_and_verts)
     # energy_function_lsq(quad_matrix, num_t, num_s, vertices, weights_and_verts, ka)  
 
-
-main()
+if __name__ == '__main__':
+    main()

@@ -14,11 +14,6 @@ class Tracker():
         self.trackingParams = config['trackingParams']
         self.meshSize = config['meshSize']
         self.reference_frame = None
-        self.xy_pairs = []
-        self.all_quads = []
-        self.solved_quads = []
-        self.quad_dict = {}
-        self.solved_quad_indices = None
         if self.outdir and not os.path.exists(self.outdir):
             os.mkdir(self.outdir)
         
@@ -219,6 +214,14 @@ class Tracker():
         br_weight = tl_area/total_area
 
         return [tl_weight, tr_weight, bl_weight, br_weight]
+    
+    def run(self):
+        feature_table = self.track_features()
+        vertices, quads, quad_dict = self.get_mesh()
+        quad_indices = self.search_quads(feature_table, quad_dict)
+        weights_and_verts = self.get_weights(feature_table, quads, quad_indices, vertices)
+
+        return feature_table, vertices, quads, quad_dict, quad_indices, weights_and_verts
 
 def main():
     parser = argparse.ArgumentParser()
@@ -231,10 +234,7 @@ def main():
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     tracker = Tracker(config)
-    feature_table = tracker.track_features()
-    vertices, quads, quad_dict = tracker.get_mesh() #all x,y pairs, all quads, dictionary where key = vertex.tobytes(), value = indices of quads in quads it belongs to
-    quad_indices = tracker.search_quads(feature_table, quad_dict) #indices of each quad to be solved for in quads
-    weights_and_verts = tracker.get_weights(feature_table, quads, quad_indices, vertices) #list of weights and their corresponding vertices
+    feature_table, vertices, quads, quad_dict, quad_indices, weights_and_verts = tracker.run()
     
 if __name__ == '__main__':
     main()
