@@ -94,12 +94,12 @@ class LeastSquaresSolver:
                     print([x_coord, y_coord], "->", vertex_num)
                     
                     if vertex_num == 0:
-                        new[i,0] = weight_x
-                        new[i+1,1] = weight_y
+                        A[i,0] = weight_x
+                        A[i+1,1] = weight_y
                         
                     else:  
-                        new[i,vertex_num*2] = weight_x
-                        new[i+1,vertex_num*2+1] = weight_y
+                        A[i,vertex_num*2] = weight_x
+                        A[i+1,vertex_num*2+1] = weight_y
         # r90 = np.array([[0,1],[-1,0]])
         #helps gets index of row in new matrix where values should be filled in
         count = 0
@@ -155,58 +155,58 @@ class LeastSquaresSolver:
                 #X COORDINATE
                 #v1x
                 if vertex_num1 == 0:
-                    new[ea_offset+count,0] = 1
+                    A[ea_offset+count,0] = 1
                 else:
-                    new[ea_offset+count,vertex_num1*2] = 1
+                    A[ea_offset+count,vertex_num1*2] = 1
                     print(vertex_num1*2)
                 #-v2x
                 if vertex_num2 == 0:
-                    new[ea_offset+count,0] = -1
+                    A[ea_offset+count,0] = -1
                 else:
-                    new[ea_offset+count,vertex_num2*2] = -1
+                    A[ea_offset+count,vertex_num2*2] = -1
 
                 #-v3y
                 if vertex_num3 == 0:
-                    new[ea_offset+count,1] = -1
+                    A[ea_offset+count,1] = -1
                 else:
-                    new[ea_offset+count,vertex_num3*2+1] = -1
+                    A[ea_offset+count,vertex_num3*2+1] = -1
 
                 #v2y
                 if vertex_num2 == 0:
-                    new[ea_offset+count,1] = 1
+                    A[ea_offset+count,1] = 1
                 else:
-                    new[ea_offset+count,vertex_num2*2+1] = 1
+                    A[ea_offset+count,vertex_num2*2+1] = 1
 
                 
                 
                 #Y COORDINATE
                 #v1y
                 if vertex_num1 == 0:
-                    new[ea_offset+count+1,1] = 1
+                    A[ea_offset+count+1,1] = 1
                 else:
-                    new[ea_offset+count+1,vertex_num1*2 + 1] = 1
+                    A[ea_offset+count+1,vertex_num1*2 + 1] = 1
                 
                 #-v2y
                 if vertex_num2 == 0:
-                    new[ea_offset+count+1,1] = -1
+                    A[ea_offset+count+1,1] = -1
                 else:
-                    new[ea_offset+count+1,vertex_num2*2+1] = -1 
+                    A[ea_offset+count+1,vertex_num2*2+1] = -1 
                 
                 #-v2x
                 if vertex_num2 == 0:
-                    new[ea_offset+count+1,0] = -1
+                    A[ea_offset+count+1,0] = -1
                 else:
-                    new[ea_offset+count+1,vertex_num2*2] = -1
+                    A[ea_offset+count+1,vertex_num2*2] = -1
                 
                 #v3x
                 if vertex_num3 == 0:
-                    new[ea_offset+count+1,0] = 1
+                    A[ea_offset+count+1,0] = 1
                 else:
-                    new[ea_offset+count+1,vertex_num3*2] = 1
+                    A[ea_offset+count+1,vertex_num3*2] = 1
                     
                 count+=2
 
-        new_w = scipy.sparse.lil_matrix(new, dtype='double')
+        new_w = scipy.sparse.lil_matrix(A, dtype='double')
 
         v_prime = scipy.sparse.linalg.lsqr(new_w.tocsr(), ka_final); # solve w/ csr
         v_prime = v_prime[0]
