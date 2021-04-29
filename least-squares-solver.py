@@ -23,7 +23,7 @@ Process for getting weight indices and ka
 2. Repeat K_a, num_frames times, to get a column vector of shape 2*num_features*num_frames x 1
 3. Reshape vertices to have 1 column ie. [v1x, v1y, v2x, v2y] of shape 2*65*33 x 1
 4. Repeat vertices, num_frames times, to get a column vector of shape 2*65*33*num_frames x 1 (Need to store this)
-5. Reshape weights_and_vertices to shape (-1, 1, 2) ie. weights_and_vertices should have shape num_feature*num_frames x 2 x 4
+5. Reshape weights_and_vertices to shape (-1, 2, 4) ie. weights_and_vertices should have shape num_feature*num_frames x 2 x 4
     where each row gives the weights associated with feature point of the same row (and row + 1) in K_a in 1., and it's corresponding quad vertex indices in 
     vertices created in 4. Will have to multiply each row second element (vertex indices) by 2 to get index value in vertices created in 4. Will have to add
     1 to the second element in every other row to give y coordinates. 
@@ -47,6 +47,7 @@ class LeastSquaresSolver:
         assert(vertices.shape == (65*33*2*feature_table.shape[1], 1))
         
         weights_and_vert_idxs = weights_and_verts.reshape(-1, 2, 4)
+        print(weights_and_vert_idxs[:2])
         assert(weights_and_vert_idxs.shape == (feature_table.shape[0]*feature_table.shape[1], 2, 4))
         weights_and_vert_idxs = np.repeat(weights_and_vert_idxs, 2, axis=0)
         assert(weights_and_vert_idxs.shape == (feature_table.shape[0]*feature_table.shape[1]*2, 2, 4))
