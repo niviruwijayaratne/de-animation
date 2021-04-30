@@ -76,7 +76,10 @@ class Tracker():
             #     break
             start_gray = frame_gray.copy()
             old_corners = good_new_corners.reshape(-1, 1, 2)
+            if frame_count >= 50:
+                break
             frame_count += 1
+            
         if writer:
             writer.release()
 
@@ -91,6 +94,7 @@ class Tracker():
         return table
 
     def get_mesh(self):
+        # print("Getting Mesh")
         '''
         Returns: 64*32 x 4 x 2 ndarray where each row indexes a mesh quad (raster order)
         and gives the 4x2 vector of the vertices that define that quad; order = 
@@ -133,6 +137,7 @@ class Tracker():
         return vertices, quads, quad_dict
         
     def construct_quad_dict(self, vertices, quads):
+
         '''
         Returns dict()
         key: byte representation of vertext coordinates
@@ -154,12 +159,13 @@ class Tracker():
         return quad_dict
         
     def search_quads(self, feature_table, quad_dict): 
+        # print("Searching Quads")
         '''
         Returns # of frames x s ndarray where each row gives the list of quads that include all feature point in that frame
         and each index in that row corresponds to the quad that contains the feature point with the same index in the tracktable
         '''
         solved_quad_indices = []
-        features = feature_table.transpose(1, 0, 2) #frame_number x feature number (x, y) coords
+        features = feature_table.transpose(1, 0, 2) #frame_number x feature number (y, x) coords
         steps = np.array([1280/64, 720/32])
         closest = np.floor(features/steps)
         top_left = np.multiply(closest, steps)
@@ -172,6 +178,7 @@ class Tracker():
         return solved_quad_indices
 
     def get_weights(self, feature_table, quads, quad_indices, vertices):
+        # print("Getting Weights")
         '''
         Returns num_frames x num_features x 2x4 where each index in a row corresponds to a 2x4 array where the first row contains the weights 
         and the second row contains the point indices in an array that is a 2-column matrix of self.xy_pairs repeated t times in [tl, tr, bl, br] order
@@ -194,6 +201,7 @@ class Tracker():
         return weights_and_verts
 
     def get_quad_weights(self, feature_point, quad_vertices):
+        # print("Getting Quad Weights")
         '''
         Inputs:
         - features: np.ndarray of shape (1x2) (x, y) coordinates of a feature point

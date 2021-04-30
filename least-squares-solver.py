@@ -7,209 +7,143 @@ from klt import Tracker
 import yaml
 import argparse
 
-#INPUTS
-#quad_matrix: quads enclosing s where points are in order top left, top right, bottom right, bottom left s*t x 4
-#num_t: number of total frames
-#num_s: number of total features per frame (anchor tracks)
-#v_map: potential vertext map??
-#v: input mesh coordinates for quad vertices enclosing anchor features
-#w: matrix with weights and x/y coordinate tuples for quads enclosing anchor features num_t*num_s*2 x 4
-#ka: vector with 2*num_s*num_t rows, each entry corresponding to the x/y coordinate of an anchor feature
-#l: weighting function 
-#have to flatten at end
-'''
-Process for getting weight indices and ka
-1. Reshape K_a ie. first row in feature track to have 1 column ie. [x1, y1, x2, y2] and so on
-2. Repeat K_a, num_frames times, to get a column vector of shape 2*num_features*num_frames x 1
-3. Reshape vertices to have 1 column ie. [v1x, v1y, v2x, v2y] of shape 2*65*33 x 1
-4. Repeat vertices, num_frames times, to get a column vector of shape 2*65*33*num_frames x 1 (Need to store this)
-5. Reshape weights_and_vertices to shape (-1, 2, 4) ie. weights_and_vertices should have shape num_feature*num_frames x 2 x 4
-    where each row gives the weights associated with feature point of the same row (and row + 1) in K_a in 1., and it's corresponding quad vertex indices in 
-    vertices created in 4. Will have to multiply each row second element (vertex indices) by 2 to get index value in vertices created in 4. Will have to add
-    1 to the second element in every other row to give y coordinates. 
-6. For every 2 rows, can recover (x, y) coordinates of quad made up from those points and find the combinations order is always top left, top right,
-    bottom left, bottom right
-
-    
-'''
 class LeastSquaresSolver:
-    def __init__(self, feature_table, vertices, weights_and_verts):
-        self.ka, self.vertices, self.weights_and_verts = self.pre_process(feature_table, vertices, weights_and_verts)
-        
-    def pre_process(self, feature_table, vertices, weights_and_verts):
+    def __init__(self, feature_table, vertices, weights_and_verts, quads):
+        self.ka, self.vertices, self.weights_and_verts, self.non_solved_verts, self.processed_quads = self.pre_process(feature_table, vertices, weights_and_verts, quads)
+        num_t = feature_table.shape[1]
+        num_s = feature_table.shape[0]
+        ka = self.ka
+        vertices = self.vertices 
+        weights_and_verts = self.weights_and_verts
+        non_solved_verts = self.non_solved_verts
+        processed_quads = self.processed_quads
+        self.energy_function_lsq(num_s, num_t, ka, vertices, weights_and_verts, non_solved_verts, processed_quads)
+
+    def pre_process(self, feature_table, vertices, weights_and_verts, quads):
+        num_s = feature_table.shape[0]
+        num_t = feature_table.shape[1]
         K_a = feature_table.transpose(1, 0, 2)[0].reshape(-1, 1)
-        K_a = np.vstack([K_a for i in range(feature_table.shape[1])])
-        assert(K_a.shape == (feature_table.shape[0]*feature_table.shape[1]*2, 1))
-        
+        K_a = np.vstack([K_a for i in range(num_t)])
+        assert(K_a.shape == (num_s*num_t*2, 1))
+
+        processed_quads = np.zeros((64*32, 4))
+        vertices = vertices.reshape(-1, 2)
+        for i, quad in enumerate(quads):
+            quad_idxs = []
+            for vert in quad:
+                quad_idxs.append(np.where((vertices == vert).all(axis=1))[0][0])
+            processed_quads[i, :] = quad_idxs
+
+        assert(processed_quads.shape == (64*32, 4))
+        processed_quads = np.vstack([processed_quads for i in range(num_t)])
+        assert(processed_quads.shape == (64*32*num_t, 4))
+        for i in range(0, processed_quads.shape[0], 64*32):
+            processed_quads[i:(64*32)*(int(i/2048) + 1), :] += len(vertices)*(int(i/2048))
+
+        processed_quads = np.repeat(processed_quads, 2, axis=0)
+        assert(processed_quads.shape == (64*32*2*num_t, 4))
+        processed_quads *= 2
+        processed_quads[np.arange(1, processed_quads.shape[0] + 1, 2)] += 1
+        processed_quads = processed_quads.astype(np.int64)
+
+
         vertices = vertices.reshape(-1, 1)
         assert(vertices.shape == (65*33*2, 1))
-        vertices = np.vstack([vertices for i in range(feature_table.shape[1])])
-        assert(vertices.shape == (65*33*2*feature_table.shape[1], 1))
-        
+        vertices = np.vstack([vertices for i in range(num_t)])
+        assert(vertices.shape == (65*33*2*num_t, 1))
         weights_and_vert_idxs = weights_and_verts.reshape(-1, 2, 4)
-        print(weights_and_vert_idxs[:2])
-        assert(weights_and_vert_idxs.shape == (feature_table.shape[0]*feature_table.shape[1], 2, 4))
+        assert(weights_and_vert_idxs.shape == (num_s*num_t, 2, 4))
         weights_and_vert_idxs = np.repeat(weights_and_vert_idxs, 2, axis=0)
-        assert(weights_and_vert_idxs.shape == (feature_table.shape[0]*feature_table.shape[1]*2, 2, 4))
+        assert(weights_and_vert_idxs.shape == (num_s*num_t*2, 2, 4))
         weights_and_vert_idxs[:, 1, :] *= 2
-        y_coords = np.arange(1, weights_and_vert_idxs.shape[0] + 1, 2).astype(np.int64)
-        weights_and_vert_idxs[y_coords, 1, :] += 1
-        return K_a, vertices, weights_and_vert_idxs
+        x_coords = np.arange(1, weights_and_vert_idxs.shape[0] + 1, 2).astype(np.int64)
+        weights_and_vert_idxs[x_coords, 1, :] += 1
+        non_solved_verts = []
+        vers = np.arange(0, vertices.shape[0], 1)
+        reshaped_idxs = np.array(sorted(list(set(list(np.squeeze(weights_and_vert_idxs[:, 1, :].reshape(-1, 1)))))))
+        for v in vers:
+            if v not in reshaped_idxs:
+                non_solved_verts.append(v)
+        
+        # print("Non Solved Verts Length: ", len(non_solved_verts))
+        # print("Solved Verts Length: ", reshaped_idxs.shape[0])
+        # print("Total Length: ", len(non_solved_verts) + reshaped_idxs.shape[0])
+        # print("Lenght of all vertices", vertices.shape[0])
+        # print("Ea", 65*33*2*num_t)
+    
+        return K_a, vertices, weights_and_vert_idxs, non_solved_verts, processed_quads
 
-    def energy_function_lsq(self, quad_matrix, num_t, num_s, v, w, ka, l=None):
+    def energy_function_lsq(self, num_s, num_t, ka, vertices, weights_and_verts, non_solved_verts, quads, l=None):
         #2*num_s*num_t -> E_a: each s has 4 x coord weights and 4 y coord weights (each set of weights has a row)..total of t frames
         #2*num_s*8*num_t -> E_s: each s has 4 points associated with it (quad), each point has 2 coordinates (x coord, y coord), each coord is part of 2 equations
-        ea_rows = 2*num_s*num_t
-        es_rows = 4*2*2*num_s*num_t
+        ea_rows = ka.shape[0] + len(non_solved_verts)
+        es_rows = 64*32*8*2*num_t
 
-        #Generate new K_a matrix with dimensions ea_rows+es_rows x 1. First E_a rows in K_a should match input. The rest should be 0
-        ka_final = np.zeros((ea_rows+es_rows,1))
-        ka_final[:self.ka.shape[0]] = self.ka
+        ka_final = np.zeros((ea_rows+es_rows, 1))
+        ka_final[:ka.shape[0]] = ka
 
         #new matrix that will be A in Ax=b
-        A = np.zeros((ea_rows+es_rows, len(v)))
+        A = np.zeros((ea_rows+es_rows, len(vertices)))
+
+        #Create K_a equations
+        for i in range(0, weights_and_verts.shape[0]):
+            weights = weights_and_verts[i, 0]
+            vert_idxs = weights_and_verts[i, 1].astype(np.int64)
+            A[i, vert_idxs] = weights
         
-        vertex_map={}
-        cnt = 0
-        for i in range(quad_matrix.shape[0]):
-            for j in range(quad_matrix.shape[1]):
-                vertex_map[cnt] = tuple(quad_matrix[i][j])
-                cnt += 1
-        #using weights and their coordinates from w, construct a new w that has weights in the correct places 
-        #with the correct mappings --> E_a
-        for i in range(0,w.shape[0], 2):
-            for j in range(w.shape[1]):
-                if i % 2 == 0:
-                    weight_x = w[i,j,0]
-                    weight_y = w[i+1,j,0]
-                    
-                    x_coord = w[i,j,1]
-                    y_coord = w[i+1,j,1]
-                
-                    #find vertex number the coordinate maps to...will use this number to find the index of 
-                    #the row at which the x and y weights should be inserted
-                    for key, value in vertex_map.items():
-                        if value == [x_coord,y_coord]:
-                            vertex_num = key
-                    print([x_coord, y_coord], "->", vertex_num)
-                    
-                    if vertex_num == 0:
-                        A[i,0] = weight_x
-                        A[i+1,1] = weight_y
-                        
-                    else:  
-                        A[i,vertex_num*2] = weight_x
-                        A[i+1,vertex_num*2+1] = weight_y
-        # r90 = np.array([[0,1],[-1,0]])
-        #helps gets index of row in new matrix where values should be filled in
-        count = 0
-        ea_offset = 2*num_s*num_t
+        #Create remaining equations
+        for idx, vert in enumerate(non_solved_verts):
+            offset = weights_and_verts.shape[0]
+            A[idx + offset, vert] = 1
+            ka_final[idx + offset] = vert
 
-        for i in range(quad_matrix.shape[0]):
-            x1 = quad_matrix[i][0][0]
-            y1 = quad_matrix[i][0][1]
+        ea_offset = ea_rows
+        for i in range(0, es_rows, 16):
+            quad_index = int(i/16)
+            y1 = quads[quad_index, 0]
+            x1 = quads[quad_index + 1, 0]
 
-            x2 = quad_matrix[i][1][0]
-            y2 = quad_matrix[i][1][1]
-
-            x3 = quad_matrix[i][2][0]
-            y3 = quad_matrix[i][2][1]
-
-            x4 = quad_matrix[i][3][0]
-            y4 = quad_matrix[i][3][1]
+            y2 = quads[quad_index, 1]
+            x2 = quads[quad_index + 1, 1]
             
-            v1 = np.array([x1, y1])
-            v2 = np.array([x2,y2])
-            v3 = np.array([x3,y3])
-            v4 = np.array([x4,y4])
+            y3 = quads[quad_index, 2]
+            x3 = quads[quad_index + 1, 2]
+
+            y4 = quads[quad_index, 3]
+            x4 = quads[quad_index + 1, 3]
             
-            #ex: solving for v1 using v4 and v3 where v4 is vertex opposite hypotenuse
-            combos = [(v1,v4,v3), (v1,v2,v3), (v2,v1,v4), (v2,v3,v4), (v3,v4,v1), (v3,v2,v1), (v4,v3,v2), (v4,v1,v2)]
+            v1 = np.array([y1, x1])
+            v2 = np.array([y2, x2])
+            v3 = np.array([y3, x3])
+            v4 = np.array([y4, x4])
+            
+            #Solve for index 0 using index 1 and 2 where index 1 is opposite hypotenuse
+            combos_x = np.array([[x1, x2, x4], [x4, x2, x1], [x1, x3, x4], [x4, x3, x1], [x2, x1, x3], [x3, x1, x2], [x2, x4, x3], [x3, x4, x2]]).astype(np.int64)
+            combos_y = np.array([[y1, y2, y4], [y4, y2, y1], [y1, y3, y4], [y4, y3, y1], [y2, y1, y3], [y3, y1, y2], [y2, y4, y3], [y3, y4, y2]]).astype(np.int64)
+            combos = [[v1, v2, v4], [v4, v2, v1], [v1, v3, v4], [v4, v3, v1], [v2, v1, v3], [v3, v1, v2], [v2, v4, v3], [v3, v4, v2]]
             # top left: v1
             # top right: v2
-            # bottom right: v3
+            # bottom left: v3
+            # bottom right: v4
+            # [x1 y1] = [x2 y2] + [y4 - y2, x2 - x4]
+            #x: index0x - index1x - index2y + index1y  
+            #y: index0y - index1y - index1x + index2x
+            for j in range(0, len(combos)*2, 2):
+                x_idxs = np.array([combos_x[j//2, 0], combos_x[j//2, 1], combos_y[j//2, 2], combos_y[j//2, 1]])
+                y_idxs = np.array([combos_y[j//2, 0], combos_y[j//2, 1], combos_x[j//2, 1], combos_x[j//2, 2]])
 
-            for j in combos:
-                x_coord = j[0][0]
-                y_coord = j[0][1]
-                
-                x_coord2 = j[1][0]
-                y_coord2 = j[1][1]
-                
-                x_coord3 = j[2][0]
-                y_coord3 = j[2][1]
-                
-                for key, value in vertex_map.items():
-                    if value == (x_coord,y_coord):
-                        vertex_num1 = key
-                    elif value == (x_coord2,y_coord2):
-                        vertex_num2 = key
-                    elif value == (x_coord3,y_coord3):
-                        vertex_num3 = key  
-                
-                #FINDING EQUATIONS
-                # V2 + R90(V3 − V2) ... V2 being vertex opposite hypotenuse, second vertex in all combos above
-                #r90 transforms vector to -> [y -x]
-                #[v1x v1y] = [v2x v2y] + [[v3y-v2y], [v2x-v3x]] 
-                
-                #X COORDINATE
-                #v1x
-                if vertex_num1 == 0:
-                    A[ea_offset+count,0] = 1
-                else:
-                    A[ea_offset+count,vertex_num1*2] = 1
-                    print(vertex_num1*2)
-                #-v2x
-                if vertex_num2 == 0:
-                    A[ea_offset+count,0] = -1
-                else:
-                    A[ea_offset+count,vertex_num2*2] = -1
+                x_coeffs = [1, -1, -1, 1]
+                y_coeffs = [1, -1, -1, 1]
 
-                #-v3y
-                if vertex_num3 == 0:
-                    A[ea_offset+count,1] = -1
-                else:
-                    A[ea_offset+count,vertex_num3*2+1] = -1
+                A[i + j + ea_offset, y_idxs] = np.array(y_coeffs)
+                A[i + j + 1 + ea_offset, x_idxs] = np.array(x_coeffs)
 
-                #v2y
-                if vertex_num2 == 0:
-                    A[ea_offset+count,1] = 1
-                else:
-                    A[ea_offset+count,vertex_num2*2+1] = 1
-
-                
-                
-                #Y COORDINATE
-                #v1y
-                if vertex_num1 == 0:
-                    A[ea_offset+count+1,1] = 1
-                else:
-                    A[ea_offset+count+1,vertex_num1*2 + 1] = 1
-                
-                #-v2y
-                if vertex_num2 == 0:
-                    A[ea_offset+count+1,1] = -1
-                else:
-                    A[ea_offset+count+1,vertex_num2*2+1] = -1 
-                
-                #-v2x
-                if vertex_num2 == 0:
-                    A[ea_offset+count+1,0] = -1
-                else:
-                    A[ea_offset+count+1,vertex_num2*2] = -1
-                
-                #v3x
-                if vertex_num3 == 0:
-                    A[ea_offset+count+1,0] = 1
-                else:
-                    A[ea_offset+count+1,vertex_num3*2] = 1
-                    
-                count+=2
-
+        print("Solving")
         new_w = scipy.sparse.lil_matrix(A, dtype='double')
 
         v_prime = scipy.sparse.linalg.lsqr(new_w.tocsr(), ka_final); # solve w/ csr
         v_prime = v_prime[0]
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -222,13 +156,11 @@ def main():
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     tracker = Tracker(config)
+    print("called run")
+
     feature_table, vertices, quads, quad_dict, quad_indices, weights_and_verts = tracker.run()
-    ka = feature_table.transpose(1, 0, 2)[0]
-    quad_matrix = quads
-    num_t = ka.shape[0]
-    num_s = ka.shape[1]
-    lsq_solver = LeastSquaresSolver(feature_table, vertices, weights_and_verts)
-    # energy_function_lsq(quad_matrix, num_t, num_s, vertices, weights_and_verts, ka)  
+    print("called lsq")
+    lsq_solver = LeastSquaresSolver(feature_table, vertices, weights_and_verts, quads)
 
 if __name__ == '__main__':
     main()
