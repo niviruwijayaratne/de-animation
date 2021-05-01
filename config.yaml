@@ -1,10 +1,10 @@
 ioParams:
   inputPath: ./inputs/test.mov
-  outputPath: final_guitar.mov
+  outputPath: final_guitar2.mov
   intermediateResults: False
 
 featureParams:
-  maxCorners: 150
+  maxCorners: 20
   qualityLevel: 0.01
   minDistance: 10
 
