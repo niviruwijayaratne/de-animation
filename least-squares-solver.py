@@ -17,6 +17,10 @@ class LeastSquaresSolver:
         self.non_solved_verts = None 
         self.processed_quads = None
         self.pre_process()
+
+        self.temporal_weight_mat = None
+        self.get_temporal_weights()
+
         v_prime = self.energy_function_lsq()
         self.draw_rectangles(v_prime)
 
@@ -103,8 +107,35 @@ class LeastSquaresSolver:
             if i % (64*32*2) == 0 and i != 0:
                 f = self.tracker.reference_frame.copy()
                 count = 0
+    
+    def get_temporal_weights(self):
+        '''
+        Input: num_features x num_frames x 2 matrix
+        Return: num_features x num_frames matrix where each row corresponds to a feature and 
+        each index gives the temporal weight of the feature at that frame index
+        '''
+        h, w = self.tracker.feature_table.shape[0], self.tracker.feature_table.shape[1]
+        self.temporal_weight_mat = np.zeros((h, w))
+        T = 2
+        
+        for s in range(h):
+            time_frame = np.where(self.tracker.feature_table[s] != 0)
+            t_start = time_frame[0][0]
+            t_end = time_frame[0][-1]
+            print(t_start, t_end)
+            for t in range(w):
+                #check if track
+                feature = self.tracker.feature_table[s, t]
+                if (feature != None).all():
+                    #apply piecewise function
+                    if ( (t >= t_start) and (t < t_start + T) ):
+                        self.temporal_weight_mat[s,t] = (t - t_start) / T
+                    elif ( (t >= t_start + T) and (t <= t_end - T) ):
+                        self.temporal_weight_mat[s,t] = 1
+                    else:
+                        self.temporal_weight_mat[s,t] = (t_end - t) / T
 
-    def energy_function_lsq(self, l=None):
+    def energy_function_lsq(self):
         num_s = self.tracker.feature_table.shape[0]
         num_t = self.tracker.feature_table.shape[1]
         ea_rows = self.ka.shape[0] + len(self.non_solved_verts)
