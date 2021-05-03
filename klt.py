@@ -4,6 +4,8 @@ import argparse
 import yaml
 import os
 import sys
+from user_input import StrokeCanvas
+import time
 
 class Tracker():
     def __init__(self, config):
@@ -23,6 +25,9 @@ class Tracker():
         self.solved_quad_indices = None
         self.weights_and_verts = None
         self.solved_quad_indices = []
+        self.anchor_indices = None
+
+        self.canvas = StrokeCanvas()
 
         if self.outdir and not os.path.exists(self.outdir):
             os.mkdir(self.outdir)
@@ -34,14 +39,30 @@ class Tracker():
             cv2.circle(img, (x, y), 2, 255, 10)
         cv2.imwrite(os.path.join(self.outdir, 'features.jpg'), img)
     
+    def de_animate_strokes(self):
+        self.canvas.master.mainloop()
+        y_coords, x_coords = self.canvas.get_de_animated_locs()    
+        y_coords = y_coords.reshape(-1, 1)
+        x_coords = x_coords.reshape(-1, 1)
+        stroke_coords = np.hstack([y_coords, x_coords])
+        return stroke_coords
+
+    def find_anchors(self, strokes, features):
+        self.anchor_indices = []
+        for i, feat in enumerate(features):
+            eq_index = np.where((strokes == feat).all(axis=1))[0]
+            if len(eq_index) > 0:
+                self.anchor_indices.append(i)
+
     def track_features(self):
         '''
         Solves for s, t table of features where s indexes over different features and t indexes over frames
         '''
-
         vid = cv2.VideoCapture(self.inputPath)
         ret, start_frame = vid.read()
         self.reference_frame = start_frame
+        cv2.imwrite('inputs/reference_frame.jpg', self.reference_frame)
+        stroke_coords = self.de_animate_strokes()     
         if self.saveIntermediate:
             writer = cv2.VideoWriter(self.outputPath ,cv2.VideoWriter_fourcc(*'mp4v'), 20.0, (start_frame.shape[1], start_frame.shape[0]))
         else:
@@ -56,6 +77,7 @@ class Tracker():
         old_corners = corners
         frame_count = 0
         feature_tracks = {}
+        first = True
         while True:
             ret, frame = vid.read() 
             if frame is None:
@@ -63,8 +85,12 @@ class Tracker():
             feature_tracks[frame_count] = np.zeros((corners.shape[0], 2))
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             new_corners, exists, error = cv2.calcOpticalFlowPyrLK(start_gray, frame_gray, old_corners, None, **self.trackingParams)
-            feature_tracks[frame_count] = np.flip(old_corners, axis=2)
-            
+            feature_corners = np.flip(old_corners, axis=2).reshape(-1, 2)
+            if first:
+                self.find_anchors(stroke_coords, feature_corners)
+                first = not first
+            feature_tracks[frame_count] = feature_corners[self.anchor_indices]
+
             good_new_corners = new_corners
             good_new_corners[~exists.all(axis=1)] = [0, 0]
             good_old_corners = old_corners
@@ -76,29 +102,31 @@ class Tracker():
                 mask = cv2.line(mask, (a,b), (c, d), color[i].tolist(), 5)
                 frame = cv2.circle(frame, (a,b), 2, color[i].tolist(), 5)
             img = cv2.add(frame, mask)
-            # if writer:
-            #     writer.write(img)
+            if writer:
+                writer.write(img)
             # cv2.imshow('frame',img)
             # k = cv2.waitKey(30) & 0xff
             # if k == 27:
             #     break
             start_gray = frame_gray.copy()
             old_corners = good_new_corners.reshape(-1, 1, 2)
-            if frame_count >= 5:
+            if frame_count >= 50:
                 break
             frame_count += 1
             
         if writer:
             writer.release()
+        vid.release
 
         self.construct_table(feature_tracks)
 
     def construct_table(self, feature_tracks) -> np.ndarray:
-        self.feature_table = np.zeros((self.featureParams['maxCorners'], max(feature_tracks.keys()) + 1, 2))
+        self.feature_table = np.zeros((len(self.anchor_indices), max(feature_tracks.keys()) + 1, 2))
         count = 0
         for t in feature_tracks.keys():
-            for s in range(self.featureParams['maxCorners']):
+            for s in range(self.feature_table.shape[0]):
                 self.feature_table[s, t] = np.squeeze(feature_tracks[t][s])
+
     def get_mesh(self):
         '''
         Returns: 64*32 x 4 x 2 ndarray where each row indexes a mesh quad (raster order)
@@ -122,7 +150,6 @@ class Tracker():
         x_steps2 = np.arange(1, self.vertices.shape[1] + 2, 2)
         y_steps1 = np.arange(0, self.vertices.shape[0] + 1, 2)
         y_steps2 = np.arange(1, self.vertices.shape[0] + 2, 2)
-
         self.quads = np.zeros((64*32, 4,  2))
         count = 0
         for j in range(len(y_steps1) - 1):

@@ -6,6 +6,7 @@ from PIL import Image, ImageTk, ImageDraw, ImageGrab
 import cv2
 import numpy as np
 import math
+import time
 
 class StrokeCanvas():
     def __init__(self):
@@ -14,7 +15,7 @@ class StrokeCanvas():
         self.bg_color = "black"
         self.canvas = Canvas(self.master, bg=self.bg_color)
         self.pen_color = 'red'
-        self.pen_thickness = 5
+        self.pen_thickness = 30
         self.export_canvas = None
         self.export_drawer = None
         self.x0 = None
@@ -25,6 +26,9 @@ class StrokeCanvas():
         self.b = {}
         self._id = None
         self.shape0 = None
+        self.green_positions = []
+        self.red_positions = []
+        self.blue_positions = []
         self.set_dims()
         self.create_widgets()
         
@@ -58,11 +62,13 @@ class StrokeCanvas():
                     self.b[self.pen_thickness].append((self.x0, self.y0))
                     self.b[self.pen_thickness].append((e.x, e.y))
 
+            # self.green_positions.append([self.x0, self.y0])
+            # self.green_positions.append([e.x, e.y])
             self.drawings.append(self.canvas.create_line(self.x0,self.y0, e.x, e.y, 
                                 width=self.pen_thickness, fill=self.pen_color, capstyle=ROUND, smooth=True, joinstyle=ROUND))
         self.x0 = e.x
         self.y0 = e.y
-    
+
 
     
     def clear_canvas(self):
@@ -76,6 +82,8 @@ class StrokeCanvas():
         self.x0 = None
         self.y0 = None
         
+    def get_de_animated_locs(self):
+        return self.y_coords, self.x_coords
 
     def save_image(self):
         for thickness, points in self.r.items():
@@ -101,6 +109,7 @@ class StrokeCanvas():
             y_f = y_s + self.im.height()
             
             strokes = cv2.imread(out_canvas)
+            self.y_coords, self.x_coords = np.where(strokes[y_s:y_f, x_s:x_f])[:2]
             mask[np.where(strokes[y_s:y_f, x_s:x_f])[:2]] = 1
             mask = np.dstack([mask, mask, mask])
             strokes = np.multiply(mask, strokes[y_s:y_f, x_s: x_f])
@@ -110,14 +119,16 @@ class StrokeCanvas():
             im_copy = strokes + cv2.cvtColor(np.multiply(np.logical_not(mask), im).astype(np.uint8), cv2.COLOR_BGR2RGB)
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             out_image = cv2.addWeighted(im_copy.astype(np.uint8), 0.4, im.astype(np.uint8), 1 - 0.4, 0)
-            print(self.shape0)
             r = self.shape0[0]/out_image.shape[0]
             out_image = cv2.resize(out_image, (self.shape0[1], self.shape0[0]), interpolation=cv2.INTER_AREA)
             cv2.imwrite('results/out_composite.jpg', out_image)
-            tkinter.messagebox.showinfo("Success", "Image Saved")
+            tkinter.messagebox.showinfo("Success", "Image Saved, Close Window")
+
+            
         except Exception as e:
             print(e)
             tkinter.messagebox.showinfo("Error", "Image not Saved")
+
     def set_dims(self):
         self.master.config(width=2560, height=1600)
         self.master.update()
@@ -172,7 +183,7 @@ class StrokeCanvas():
         clear_canvas = TkinterCustomButton(text="Clear Canvas", corner_radius=10, command=self.clear_canvas, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
         clear_canvas_window = self.canvas.create_window(250/2, 300, anchor=CENTER, window=clear_canvas)
 
-        thickness_slider = Scale(self.master, from_=5, to=100, length=200, orient=VERTICAL, command=self.change_thickness)
+        thickness_slider = Scale(self.master, from_=30, to=100, length=200, orient=VERTICAL, command=self.change_thickness)
         # s2 = Scale(self.master, from_=0, to=100, tickinterval=100, sliderrelief='flat', orient="horizontal", highlightthickness=1, highlightcolor='red', background='white', fg='black', troughcolor='#2874A6', activebackground='grey', length=200)
         tw = self.canvas.create_window(250/2, 500, anchor=CENTER, window=thickness_slider)
 
@@ -450,6 +461,4 @@ class TkinterCustomButton(tkinter.Frame):
         if self.function is not None:
             self.function()
             self.on_leave()
-
-s = StrokeCanvas()
-s.master.mainloop()
+            
