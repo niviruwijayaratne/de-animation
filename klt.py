@@ -4,8 +4,8 @@ import argparse
 import yaml
 import os
 import sys
-from user_input import StrokeCanvas
 import time
+import threading
 
 class Tracker():
     def __init__(self, config):
@@ -26,9 +26,6 @@ class Tracker():
         self.weights_and_verts = None
         self.solved_quad_indices = []
         self.anchor_indices = None
-
-        self.canvas = StrokeCanvas()
-
         if self.outdir and not os.path.exists(self.outdir):
             os.mkdir(self.outdir)
         
@@ -37,14 +34,19 @@ class Tracker():
         for i in corners:
             x, y = i.ravel()
             cv2.circle(img, (x, y), 2, 255, 10)
-        cv2.imwrite(os.path.join(self.outdir, 'features.jpg'), img)
+        # cv2.imwrite(os.path.join(self.outdir, 'features.jpg'), img)
+        cv2.imshow('corners', img)
+        cv2.waitKey(0)
     
     def de_animate_strokes(self):
-        self.canvas.master.mainloop()
-        y_coords, x_coords = self.canvas.get_de_animated_locs()    
+        y_coords, x_coords = np.load("results/y_coords.npy"), np.load("results/x_coords.npy")
         y_coords = y_coords.reshape(-1, 1)
         x_coords = x_coords.reshape(-1, 1)
         stroke_coords = np.hstack([y_coords, x_coords])
+        # for c in stroke_coords:
+        #     cv2.circle(self.reference_frame, tuple(c[::-1]), 10, (0, 0, 255), 5)
+        # cv2.imshow('f', self.reference_frame)
+        # cv2.waitKey(0)
         return stroke_coords
 
     def find_anchors(self, strokes, features):
@@ -69,8 +71,8 @@ class Tracker():
             writer = None
         start_gray = cv2.cvtColor(start_frame, cv2.COLOR_BGR2GRAY)
         corners = cv2.goodFeaturesToTrack(start_gray, **self.featureParams)
-        if self.saveIntermediate:
-            self.draw_corners(start_frame, corners)
+        # if self.saveIntermediate:
+        # self.draw_corners(start_frame, corners)
 
         color = np.random.randint(0, 255, (self.featureParams['maxCorners'], 3))
         mask = np.zeros_like(start_frame)
@@ -90,6 +92,10 @@ class Tracker():
                 self.find_anchors(stroke_coords, feature_corners)
                 first = not first
             feature_tracks[frame_count] = feature_corners[self.anchor_indices]
+            # for f in feature_tracks[frame_count]:
+            #     cv2.circle(self.reference_frame, tuple(f[::-1]), 10, (0, 0, 255), 2)
+            # cv2.imshow('f', self.reference_frame)
+            # cv2.waitKey(0)
 
             good_new_corners = new_corners
             good_new_corners[~exists.all(axis=1)] = [0, 0]
@@ -110,7 +116,7 @@ class Tracker():
             #     break
             start_gray = frame_gray.copy()
             old_corners = good_new_corners.reshape(-1, 1, 2)
-            if frame_count >= 50:
+            if frame_count >= 4:
                 break
             frame_count += 1
             
@@ -180,11 +186,12 @@ class Tracker():
                 for i, quad in enumerate(self.quads):
                     eq = (pair == quad).all(axis=1)
                     if eq.any():
-                        if np.where(eq)[0] != 0:
-                            continue
+                        if tuple(pair) not in self.quad_dict:
+                            self.quad_dict[tuple(pair)] = [-1]*4
+                            self.quad_dict[tuple(pair)][int(np.where(eq)[0])] = i
                         else:
-                            self.quad_dict[tuple(pair)] = i
-        
+                            self.quad_dict[tuple(pair)][int(np.where(eq)[0])] = i
+
     def search_quads(self): 
         '''
         Returns # of frames x s ndarray where each row gives the list of quads that include all feature point in that frame
@@ -198,8 +205,7 @@ class Tracker():
         for i, row in enumerate(top_left):
             for j, point in enumerate(row):
                 if tuple(point) in self.quad_dict.keys():
-                    self.solved_quad_indices[i, j] = self.quad_dict[tuple(point)]
-        self.solved_quad_indices = self.solved_quad_indices.astype(np.int64)
+                    self.solved_quad_indices[i, j] = self.quad_dict[tuple(point)][0]
 
     def get_weights(self):
         '''
@@ -213,6 +219,10 @@ class Tracker():
         for i, row in enumerate(self.solved_quad_indices):
             frame_adder = i*len(vertices)
             for j, quad_idx in enumerate(row):
+                if quad_idx < 0:
+                    continue
+                else:
+                    quad_idx = int(quad_idx)
                 quad_vertices = self.quads[quad_idx]
                 feature_point = features[i, j]
                 weights = self.get_quad_weights(feature_point, quad_vertices)

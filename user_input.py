@@ -29,6 +29,7 @@ class StrokeCanvas():
         self.green_positions = []
         self.red_positions = []
         self.blue_positions = []
+        self.destroy = False
         self.set_dims()
         self.create_widgets()
         
@@ -109,7 +110,9 @@ class StrokeCanvas():
             y_f = y_s + self.im.height()
             
             strokes = cv2.imread(out_canvas)
-            self.y_coords, self.x_coords = np.where(strokes[y_s:y_f, x_s:x_f])[:2]
+            y_coords, x_coords = np.where(strokes[y_s:y_f, x_s:x_f])[:2]
+            # np.save('y_coords.npy', y_coords)
+            # np.save('x_coords.npy', x_coords)
             mask[np.where(strokes[y_s:y_f, x_s:x_f])[:2]] = 1
             mask = np.dstack([mask, mask, mask])
             strokes = np.multiply(mask, strokes[y_s:y_f, x_s: x_f])
@@ -121,6 +124,10 @@ class StrokeCanvas():
             out_image = cv2.addWeighted(im_copy.astype(np.uint8), 0.4, im.astype(np.uint8), 1 - 0.4, 0)
             r = self.shape0[0]/out_image.shape[0]
             out_image = cv2.resize(out_image, (self.shape0[1], self.shape0[0]), interpolation=cv2.INTER_AREA)
+            strokes = cv2.resize(strokes, (self.shape0[1], self.shape0[0]), interpolation=cv2.INTER_AREA)
+            y_coords, x_coords = np.where(strokes)[:2]
+            np.save('results/y_coords.npy', y_coords)
+            np.save('results/x_coords.npy', x_coords)
             cv2.imwrite('results/out_composite.jpg', out_image)
             tkinter.messagebox.showinfo("Success", "Image Saved, Close Window")
 
@@ -128,7 +135,7 @@ class StrokeCanvas():
         except Exception as e:
             print(e)
             tkinter.messagebox.showinfo("Error", "Image not Saved")
-
+            
     def set_dims(self):
         self.master.config(width=2560, height=1600)
         self.master.update()
@@ -164,6 +171,9 @@ class StrokeCanvas():
     def choose_blue(self):
 	    self.pen_color = 'blue'
 
+    # def set_false(self):
+    #     self.destroy = True
+    
     def create_widgets(self):
         settings_frame = Frame(self.master, bg='white', height=self.canvas.winfo_screenheight(), width=250)
         settings_window = self.canvas.create_window(0, 0, anchor=NW, window=settings_frame)
@@ -189,6 +199,9 @@ class StrokeCanvas():
 
         t = TkinterCustomButton(text="Export Image", corner_radius=10, command=self.save_image, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
         tt = self.canvas.create_window(250/2, 700, anchor=CENTER, window=t)
+
+        # t2 = Button(text="Close", command=self.master.quit)
+        # tl = self.canvas.create_window(250/2, 800, anchor=CENTER, window=t2)
 
 class TkinterCustomButton(tkinter.Frame):
     """ tkinter custom button with border, rounded corners and hover effect
@@ -461,4 +474,6 @@ class TkinterCustomButton(tkinter.Frame):
         if self.function is not None:
             self.function()
             self.on_leave()
-            
+
+t = StrokeCanvas()
+t.master.mainloop()

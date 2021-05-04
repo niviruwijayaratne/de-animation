@@ -9,7 +9,6 @@ import argparse
 import sys
 import time
 
-
 class LeastSquaresSolver:
     def __init__(self, tracker):
         self.tracker = tracker
@@ -19,25 +18,10 @@ class LeastSquaresSolver:
         self.non_solved_verts = None 
         self.processed_quads = None
         self.temporal_weight_mat = None
-
-
+        
         self.get_temporal_weights()
         self.pre_process()
-        # print("KA: ", sys.getsizeof(self.ka))
-        # print("Vertices: ", sys.getsizeof(self.vertices))
-        # print("WV: ", sys.getsizeof(self.weights_and_verts))
-        # print("NSV: ", sys.getsizeof(self.non_solved_verts))
-        # print("QS: ", sys.getsizeof(self.processed_quads))
-        # print("Tracker: ", sys.getsizeof(self.tracker))
-        # sys.exit()
-        
-
         v_prime = self.energy_function_lsq()
-        # x = v_prime[np.array(self.non_solved_verts)] - self.vertices[np.array(self.non_solved_verts)]
-        # for x in self.non_solved_verts:
-        #     print(v_prime[x], self.vertices[x])
-
-        # sys.exit()
         self.draw_rectangles(v_prime)
 
     def pre_process(self):
@@ -45,7 +29,7 @@ class LeastSquaresSolver:
         num_t = self.tracker.feature_table.shape[1]
         self.ka = self.tracker.feature_table.transpose(1, 0, 2)[0].reshape(-1, 2)
         self.ka = self.tracker.feature_table.transpose(1, 0, 2)[0].reshape(-1, 1)
-        self.ka = np.vstack([self.ka for i in range(num_t)])
+        self.ka = np.tile(self.ka, (num_t, 1))
         assert(self.ka.shape == (num_s*num_t*2, 1))
 
         self.processed_quads = np.zeros((64*32, 4))
@@ -57,7 +41,7 @@ class LeastSquaresSolver:
             self.processed_quads[i, :] = quad_idxs
 
         assert(self.processed_quads.shape == (64*32, 4))
-        self.processed_quads = np.vstack([self.processed_quads for i in range(num_t)])
+        self.processed_quads = np.tile(self.processed_quads, (num_t, 1))
         assert(self.processed_quads.shape == (64*32*num_t, 4))
         for i in range(0, self.processed_quads.shape[0], 64*32):
             self.processed_quads[i:(64*32)*(int(i/2048) + 1), :] += len(self.tracker.vertices)*(int(i/2048))
@@ -69,7 +53,7 @@ class LeastSquaresSolver:
 
         self.vertices = self.tracker.vertices.reshape(-1, 1)
         assert(self.vertices.shape == (65*33*2, 1))
-        self.vertices = np.vstack([self.vertices for i in range(num_t)])
+        self.vertices = np.tile(self.vertices, (num_t, 1))
         assert(self.vertices.shape == (65*33*2*num_t, 1))
         self.weights_and_verts = self.tracker.weights_and_verts.reshape(-1, 2, 4)
         assert(self.weights_and_verts.shape == (num_s*num_t, 2, 4))
@@ -79,7 +63,7 @@ class LeastSquaresSolver:
         x_coords = np.arange(1, self.weights_and_verts.shape[0] + 1, 2).astype(np.int64)
         self.weights_and_verts[x_coords, 1, :] += 1
         self.non_solved_verts = []
-        vers = np.arange(0, self.tracker.vertices.shape[0], 1)
+        vers = np.arange(0, self.vertices.shape[0], 1)
         reshaped_idxs = np.array(sorted(list(set(list(np.squeeze(self.weights_and_verts[:, 1, :].reshape(-1, 1)))))))
         for v in vers:
             if v not in reshaped_idxs:
@@ -90,36 +74,58 @@ class LeastSquaresSolver:
 
     def draw_rectangles(self, v_prime):
         print("drawing")
-        f = self.tracker.reference_frame.copy()
+        f = cv2.imread('inputs/reference_frame.jpg')
         count = 0
         h, w = self.tracker.reference_frame.shape[0], self.tracker.reference_frame.shape[1]
-        writer = cv2.VideoWriter("results/warped_quads.mp4" ,cv2.VideoWriter_fourcc(*'mp4v'), 20.0, (w, h))
-
+        writer = cv2.VideoWriter("results/gg2.mp4" ,cv2.VideoWriter_fourcc(*'mp4v'), 20.0, (w, h))
+        counter = 0
         for i in range(0, self.processed_quads.shape[0], 2):
             y_tl = v_prime[self.processed_quads[i][0]]
             x_tl = v_prime[self.processed_quads[i + 1][0]]
+
+            y_tr = v_prime[self.processed_quads[i][1]]
+            x_tr = v_prime[self.processed_quads[i + 1][1]]
+
+            y_bl = v_prime[self.processed_quads[i][2]]
+            x_bl = v_prime[self.processed_quads[i + 1][2]]
 
             y_br = v_prime[self.processed_quads[i][3]]
             x_br = v_prime[self.processed_quads[i + 1][3]]
             
             y_tl = int(np.rint(y_tl))
-            x_tl = int(np.rint(y_tl))
+            x_tl = int(np.rint(x_tl))
+
+            y_tr = int(np.rint(y_tr))
+            x_tr = int(np.rint(x_tr))
+
+            y_bl = int(np.rint(y_bl))
+            x_bl = int(np.rint(x_bl))
+
             y_br = int(np.rint(y_br))
             x_br = int(np.rint(x_br))
 
-            cv2.rectangle(f, (x_tl, y_tl), (x_br, y_br), (255, 0, 0), 1)
+            cv2.line(f, (x_tl, y_tl), (x_tr, y_tr), (255, 0, 0), 1)
+            cv2.line(f, (x_tr, y_tr), (x_br, y_br), (255, 0, 0), 1)
+            cv2.line(f, (x_br, y_br), (x_bl, y_bl), (255, 0, 0), 1)
+            cv2.line(f, (x_bl, y_bl), (x_tl, y_tl), (255, 0, 0), 1)
 
             y_tl_o = self.vertices[self.processed_quads[i][0]]
             x_tl_o = self.vertices[self.processed_quads[i + 1][0]]
+            
+            y_tr_o = self.vertices[self.processed_quads[i][1]]
+            x_tr_o = self.vertices[self.processed_quads[i + 1][1]]
+
+            y_bl_o = self.vertices[self.processed_quads[i][2]]
+            x_bl_o = self.vertices[self.processed_quads[i + 1][2]]
 
             y_br_o = self.vertices[self.processed_quads[i][3]]
             x_br_o = self.vertices[self.processed_quads[i + 1][3]]
 
+            # cv2.rectangle(f, (x_tl_o, y_tl_o), (x_br_o, y_br_o), (0, 0, 255), 1)
             if (i + 2) % (64*32*2) == 0:
+                counter += 1
                 writer.write(f)
-                # cv2.imshow('f', f)
-                # cv2.waitKey(0)
-                f = self.tracker.reference_frame.copy()
+                f = cv2.imread('inputs/reference_frame.jpg')
         writer.release()
     
     def get_temporal_weights(self):
@@ -131,28 +137,30 @@ class LeastSquaresSolver:
         s, t = self.tracker.feature_table.shape[0], self.tracker.feature_table.shape[1]
         self.temporal_weight_mat = np.zeros((s, t))
         T = 15
-        
+        eps = 1e-2
         for s_i in range(s):
-            time_frame = np.where(self.tracker.feature_table[s_i] != 0)
+            time_frame = np.where(self.tracker.feature_table[s_i] != None)
             t_start = time_frame[0][0]
             t_end = time_frame[0][-1]
+            
             for t_i in range(t):
                 #check if track
                 feature = self.tracker.feature_table[s_i, t_i]
                 if (feature != None).all():
                     #apply piecewise function
                     if ( (t_i >= t_start) and (t_i < t_start + T) ):
-                        self.temporal_weight_mat[s_i, t_i] = (t_i - t_start) / T
+                        self.temporal_weight_mat[s_i, t_i] = ((t_i - t_start) / T)
                     elif ( (t_i >= t_start + T) and (t_i <= t_end - T) ):
                         self.temporal_weight_mat[s_i, t_i] = 1
                     else:
-                        self.temporal_weight_mat[s_i, t_i] = (t_end - t_i) / T
+                        self.temporal_weight_mat[s_i, t_i] = ((t_end - t_i) / T)
 
     def energy_function_lsq(self):
         num_s = self.tracker.feature_table.shape[0]
         num_t = self.tracker.feature_table.shape[1]
         ea_rows = self.ka.shape[0] + len(self.non_solved_verts)        
         es_rows = 64*32*8*2*num_t
+
         ka_final = np.zeros((ea_rows+es_rows, 1))
         ka_final[:self.ka.shape[0]] = np.multiply(self.ka, np.sqrt(self.temporal_weight_mat))
         A = scipy.sparse.lil_matrix((ea_rows + es_rows, len(self.vertices)))
@@ -168,7 +176,7 @@ class LeastSquaresSolver:
             offset = self.weights_and_verts.shape[0]
             A[idx + offset, vert] = 1
             ka_final[idx + offset] = self.vertices[vert]
-        
+
         #Create K_s equations
         ea_offset = ea_rows
         for i in range(0, es_rows, 16):
@@ -190,7 +198,6 @@ class LeastSquaresSolver:
             v2 = np.array([y2, x2])
             v3 = np.array([y3, x3])
             v4 = np.array([y4, x4])
-            
             #Solve for index 0 using index 1 and 2 where index 1 is opposite hypotenuse
             combos_x = np.array([[x1, x2, x4], [x4, x2, x1], [x1, x3, x4], [x4, x3, x1], [x2, x1, x3], [x3, x1, x2], [x2, x4, x3], [x3, x4, x2]]).astype(np.int64)
             combos_y = np.array([[y1, y2, y4], [y4, y2, y1], [y1, y3, y4], [y4, y3, y1], [y2, y1, y3], [y3, y1, y2], [y2, y4, y3], [y3, y4, y2]]).astype(np.int64)
@@ -214,9 +221,21 @@ class LeastSquaresSolver:
 
         v_prime = scipy.sparse.linalg.lsqr(A.tocsr(), ka_final) # solve w/ csr
         v_prime = v_prime[0]
+        z = 0
 
+        for i in range(0, len(v_prime), 2):
+            if v_prime[i] == 0:
+                z += 1
+            if v_prime[i + 1] == 0:
+                z += 1
+            if v_prime[i] > self.tracker.reference_frame.shape[0]:
+                z += 1
+            if v_prime[i + 1] > self.tracker.reference_frame.shape[1]:
+                z += 1
+        print(str(100 - (z/len(v_prime)*100)) + "% Valid Points")
         return v_prime
-        
+
+            
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
