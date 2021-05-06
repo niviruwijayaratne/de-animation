@@ -15,7 +15,7 @@ class StrokeCanvas():
         self.bg_color = "black"
         self.canvas = Canvas(self.master, bg=self.bg_color)
         self.pen_color = 'red'
-        self.pen_thickness = 30
+        self.pen_thickness = 15
         self.export_canvas = None
         self.export_drawer = None
         self.x0 = None
@@ -193,7 +193,7 @@ class StrokeCanvas():
         clear_canvas = TkinterCustomButton(text="Clear Canvas", corner_radius=10, command=self.clear_canvas, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
         clear_canvas_window = self.canvas.create_window(250/2, 300, anchor=CENTER, window=clear_canvas)
 
-        thickness_slider = Scale(self.master, from_=30, to=100, length=200, orient=VERTICAL, command=self.change_thickness)
+        thickness_slider = Scale(self.master, from_=15, to=100, length=200, orient=VERTICAL, command=self.change_thickness)
         # s2 = Scale(self.master, from_=0, to=100, tickinterval=100, sliderrelief='flat', orient="horizontal", highlightthickness=1, highlightcolor='red', background='white', fg='black', troughcolor='#2874A6', activebackground='grey', length=200)
         tw = self.canvas.create_window(250/2, 500, anchor=CENTER, window=thickness_slider)
 

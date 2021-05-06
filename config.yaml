@@ -1,6 +1,6 @@
 ioParams:
-  inputPath: ./inputs/test.mov
-  outputPath: final_guitar2.mov
+  inputPath: ./inputs/bai_guitar.mp4
+  outputPath: mk.mov
   intermediateResults: False
 
 featureParams:

@@ -11,7 +11,7 @@ class Tracker():
     def __init__(self, config):
         self.inputPath = config['ioParams']['inputPath']
         self.saveIntermediate = config['ioParams']['intermediateResults']
-        self.outdir = os.path.join(os.getcwd(), 'results') if self.saveIntermediate else None
+        self.outdir = os.path.join(os.getcwd(), 'results') 
         self.outputPath = os.path.join(self.outdir, config['ioParams']['outputPath']) if self.outdir else None
         self.featureParams = config['featureParams']
         self.trackingParams = config['trackingParams']
@@ -37,17 +37,20 @@ class Tracker():
         # cv2.imwrite(os.path.join(self.outdir, 'features.jpg'), img)
         cv2.imshow('corners', img)
         cv2.waitKey(0)
+        
     
     def de_animate_strokes(self):
         y_coords, x_coords = np.load("results/y_coords.npy"), np.load("results/x_coords.npy")
         y_coords = y_coords.reshape(-1, 1)
         x_coords = x_coords.reshape(-1, 1)
         stroke_coords = np.hstack([y_coords, x_coords])
+        f = np.zeros_like(self.reference_frame[:, :, 0]).astype(np.uint8)
+        f[y_coords, x_coords] = 255    
         # for c in stroke_coords:
         #     cv2.circle(self.reference_frame, tuple(c[::-1]), 10, (0, 0, 255), 5)
         # cv2.imshow('f', self.reference_frame)
         # cv2.waitKey(0)
-        return stroke_coords
+        return f
 
     def find_anchors(self, strokes, features):
         self.anchor_indices = []
@@ -61,21 +64,19 @@ class Tracker():
         Solves for s, t table of features where s indexes over different features and t indexes over frames
         '''
         vid = cv2.VideoCapture(self.inputPath)
+        fps = vid.get(cv2.CAP_PROP_FPS)
+        print(fps, type(fps))
         ret, start_frame = vid.read()
         self.reference_frame = start_frame
         cv2.imwrite('inputs/reference_frame.jpg', self.reference_frame)
-        stroke_coords = self.de_animate_strokes()     
-        if self.saveIntermediate:
-            writer = cv2.VideoWriter(self.outputPath ,cv2.VideoWriter_fourcc(*'mp4v'), 20.0, (start_frame.shape[1], start_frame.shape[0]))
-        else:
-            writer = None
+        stroke_mask = self.de_animate_strokes()     
+        writer = cv2.VideoWriter(self.outputPath ,cv2.VideoWriter_fourcc(*'mp4v'), fps, (start_frame.shape[1], start_frame.shape[0]))
         start_gray = cv2.cvtColor(start_frame, cv2.COLOR_BGR2GRAY)
-        corners = cv2.goodFeaturesToTrack(start_gray, **self.featureParams)
-        # if self.saveIntermediate:
+        print(start_frame.shape, stroke_mask.shape)
+        corners = cv2.goodFeaturesToTrack(start_gray, **self.featureParams, mask = stroke_mask)
         # self.draw_corners(start_frame, corners)
-
-        color = np.random.randint(0, 255, (self.featureParams['maxCorners'], 3))
-        mask = np.zeros_like(start_frame)
+        # color = np.random.randint(0, 255, (self.featureParams['maxCorners'], 3))
+        # mask = np.zeros_like(start_frame)
         old_corners = corners
         frame_count = 0
         feature_tracks = {}
@@ -88,46 +89,44 @@ class Tracker():
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             new_corners, exists, error = cv2.calcOpticalFlowPyrLK(start_gray, frame_gray, old_corners, None, **self.trackingParams)
             feature_corners = np.flip(old_corners, axis=2).reshape(-1, 2)
-            if first:
-                self.find_anchors(stroke_coords, feature_corners)
-                first = not first
-            feature_tracks[frame_count] = feature_corners[self.anchor_indices]
+            feature_tracks[frame_count] = feature_corners
             # for f in feature_tracks[frame_count]:
-            #     cv2.circle(self.reference_frame, tuple(f[::-1]), 10, (0, 0, 255), 2)
-            # cv2.imshow('f', self.reference_frame)
+            #     cv2.circle(frame, tuple(f[::-1]), 10, (255, 0, 0), 1)
+            # cv2.imshow('f', frame)
             # cv2.waitKey(0)
-
             good_new_corners = new_corners
-            good_new_corners[~exists.all(axis=1)] = [0, 0]
+            good_new_corners[~exists.all(axis=1)] = None
             good_old_corners = old_corners
-            good_old_corners[~exists.all(axis=1)] = [0, 0]
+            good_old_corners[~exists.all(axis=1)] = None
 
-            for i, (new, old) in enumerate(zip(good_new_corners, good_old_corners)):
-                a, b = new.ravel()
-                c, d = old.ravel()
-                mask = cv2.line(mask, (a,b), (c, d), color[i].tolist(), 5)
-                frame = cv2.circle(frame, (a,b), 2, color[i].tolist(), 5)
-            img = cv2.add(frame, mask)
-            if writer:
-                writer.write(img)
+            # for i, (new, old) in enumerate(zip(good_new_corners, good_old_corners)):
+            #     a, b = new.ravel()
+            #     c, d = old.ravel()
+            #     mask = cv2.line(mask, (a,b), (c, d), color[i].tolist(), 5)
+            #     frame = cv2.circle(frame, (a,b), 2, color[i].tolist(), 5)
+            # img = cv2.add(frame, mask)
+            # if writer:
+            # writer.write(img)
             # cv2.imshow('frame',img)
             # k = cv2.waitKey(30) & 0xff
             # if k == 27:
             #     break
             start_gray = frame_gray.copy()
             old_corners = good_new_corners.reshape(-1, 1, 2)
-            if frame_count >= 4:
-                break
+            # if frame_count >:
+            #     break
             frame_count += 1
             
-        if writer:
-            writer.release()
-        vid.release
+        # if writer:
+        writer.release()
+        vid.release()
+        # sys.exit()
+        print(frame_count)
 
         self.construct_table(feature_tracks)
 
     def construct_table(self, feature_tracks) -> np.ndarray:
-        self.feature_table = np.zeros((len(self.anchor_indices), max(feature_tracks.keys()) + 1, 2))
+        self.feature_table = np.zeros((feature_tracks[list(feature_tracks.keys())[0]].shape[0], max(feature_tracks.keys()) + 1, 2))
         count = 0
         for t in feature_tracks.keys():
             for s in range(self.feature_table.shape[0]):
@@ -152,29 +151,44 @@ class Tracker():
         for i, y in enumerate(y_grid):
             self.vertices[i, :, :] = np.array(list(zip(y, x_grid[0])))
 
-        x_steps1 = np.arange(0, self.vertices.shape[1] + 1, 2)
-        x_steps2 = np.arange(1, self.vertices.shape[1] + 2, 2)
-        y_steps1 = np.arange(0, self.vertices.shape[0] + 1, 2)
-        y_steps2 = np.arange(1, self.vertices.shape[0] + 2, 2)
+        # x_steps1 = np.arange(0, self.vertices.shape[1] + 1, 2)
+        # x_steps2 = np.arange(1, self.vertices.shape[1] + 2, 2)
+        # y_steps1 = np.arange(0, self.vertices.shape[0] + 1, 2)
+        # y_steps2 = np.arange(1, self.vertices.shape[0] + 2, 2)
         self.quads = np.zeros((64*32, 4,  2))
-        count = 0
-        for j in range(len(y_steps1) - 1):
-            for i in range(len(x_steps1) - 1):
-                pairs = np.squeeze(self.vertices[y_steps1[j]:y_steps1[j + 1], x_steps1[i]:x_steps1[i+1]])
-                self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
-                count += 1
-                pairs = np.squeeze(self.vertices[y_steps1[j]:y_steps1[j + 1], x_steps2[i]:x_steps2[i+1]])
-                self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
-                count += 1
-            
-            for i in range(len(x_steps1) - 1):
-                pairs = np.squeeze(self.vertices[y_steps2[j]:y_steps2[j + 1], x_steps1[i]:x_steps1[i+1]])
-                self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
-                count += 1
-                pairs = np.squeeze(self.vertices[y_steps2[j]:y_steps2[j + 1], x_steps2[i]:x_steps2[i+1]])
-                self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
-                count += 1
+        # count = 0
+        count_steps = np.arange(0, (64*32), 1)
+        # self.quads[count_steps] = 
+        y_steps = np.arange(0, self.vertices.shape[0] - 1, 1).reshape(-1, 1)
+        y_steps = np.hstack([y_steps, y_steps + 1]).reshape(-1, 2)
+        x_steps = np.arange(0, self.vertices.shape[1] - 1, 1).reshape(-1, 1)
+        x_steps = np.hstack([x_steps, x_steps + 1]).reshape(-1, 2)
+        x_steps = np.hstack([x_steps, x_steps]).reshape(-1, 2, 2)
+        y_steps_final = np.repeat(y_steps, x_steps.shape[0], axis = 0).reshape(-1, 2, 1)
+        x_steps_final = np.tile(x_steps, (y_steps.shape[0], 1, 1))
 
+        self.quads[count_steps] = np.squeeze(self.vertices[y_steps_final, x_steps_final]).reshape(-1, 4, 2)
+        # sys.exit()
+        # for j in range(len(y_steps1) - 1):
+        #     for i in range(len(x_steps1) - 1):
+        #         print(y_steps1[j], y_steps1[j + 1], x_steps1[j], x_steps1[j + 1])
+        #         sys.exit()
+        #         pairs = np.squeeze(self.vertices[y_steps1[j]:y_steps1[j + 1], x_steps1[i]:x_steps1[i+1]])
+        #         self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
+        #         count += 1
+        #         pairs = np.squeeze(self.vertices[y_steps1[j]:y_steps1[j + 1], x_steps2[i]:x_steps2[i+1]])
+        #         self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
+        #         count += 1
+            
+        #     for i in range(len(x_steps1) - 1):
+        #         pairs = np.squeeze(self.vertices[y_steps2[j]:y_steps2[j + 1], x_steps1[i]:x_steps1[i+1]])
+        #         self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
+        #         count += 1
+        #         pairs = np.squeeze(self.vertices[y_steps2[j]:y_steps2[j + 1], x_steps2[i]:x_steps2[i+1]])
+        #         self.quads[count] = np.array([pairs[0, 0], pairs[0, 1], pairs[1, 0], pairs[1, 1]])
+        #         count += 1
+        # print(y_steps2[j])
+        # sys.exit()
     def construct_quad_dict(self):
         '''
         Returns dict()
@@ -191,6 +205,7 @@ class Tracker():
                             self.quad_dict[tuple(pair)][int(np.where(eq)[0])] = i
                         else:
                             self.quad_dict[tuple(pair)][int(np.where(eq)[0])] = i
+                                 
 
     def search_quads(self): 
         '''
@@ -216,6 +231,9 @@ class Tracker():
         vertices = self.vertices.reshape(-1, 2)
         frame_adder = 0
         self.weights_and_verts = np.zeros((features.shape[0], features.shape[1], 2, 4))
+        # row_idxs = np.arange(0, self.solved_quad_indices.shape[0], 1).reshape(-1, 1)
+        # frame_adder = row_idxs * vertices.shape[0]
+        # sys.exit()
         for i, row in enumerate(self.solved_quad_indices):
             frame_adder = i*len(vertices)
             for j, quad_idx in enumerate(row):
@@ -230,7 +248,7 @@ class Tracker():
                 for vertex in quad_vertices:
                     solved_vertices.append(int(np.where((vertices == vertex).all(axis=1))[0]) + frame_adder)
                 self.weights_and_verts[i, j, :, :] = np.array([weights, solved_vertices])
-
+                
     def get_quad_weights(self, feature_point, quad_vertices):
         '''
         Inputs:
