@@ -27,7 +27,7 @@ Returns the mean RGB pixel variances, computed within the green strokes across a
 :param input:   string          video path
 :param average: numpy.ndarray   float64 array with the average RGB pixel values
 :param m:       numpy.ndarray   boolean array where the green strokes are False and everything else is True
-:return: float (variance)
+:return: number of frames, variance
 (1080, 1920, 3)
 """
 def get_variances(input, average, m):
@@ -44,10 +44,13 @@ def get_variances(input, average, m):
         success, frame = vid.read()
     var_avg = var_avg / num_frames
     var = np.ma.masked_array(var_avg, mask=m)
-    return np.mean(var)
+    return num_frames, np.mean(var)
 
-average = get_average_image("inputs/beer.mp4", "results/beer_average.png")
-print(average)
+input_path = "inputs/beer.mp4"
+output_path = "results/beer_average.png"
+average = get_average_image(input_path, output_path)
 mask = np.zeros((1080, 1920, 3), dtype=bool)
-var = get_variances("inputs/beer.mp4", average, mask)
+num_frames, var = get_variances(input_path, average, mask)
+print("# of Frames:", num_frames)
+print("Input:", var)
 print(var)
