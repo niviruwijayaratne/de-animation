@@ -40,6 +40,7 @@ class StrokeCanvas():
 
         self.set_dims()
         self.create_widgets()
+        self.display_image()
         
     def change_thickness(self, e):
         self.pen_thickness = int(e)
@@ -135,7 +136,7 @@ class StrokeCanvas():
             np.save(os.path.join(self.outdir, 'y_coords.npy'), y_coords)
             np.save(os.path.join(self.outdir, 'x_coords.npy'), x_coords)
             cv2.imwrite(os.path.join(self.outdir, 'out_composite.jpg'), out_image)
-            tkinter.messagebox.showinfo("Success", "Image Saved")
+            tkinter.messagebox.showinfo("Success", "Image Saved, Closing GUI")
             self.destroy = True
             self.canvas.pack_forget()
             self.canvas.destroy()
@@ -154,10 +155,8 @@ class StrokeCanvas():
         self.canvas.bind('<ButtonRelease-1>',self.reset)
         self.canvas.update()
 
-    def select_image(self):
-        # try:
-        im = filedialog.askopenfilename()
-        self.im = ImageTk.PhotoImage(Image.open(im))
+    def display_image(self):
+        self.im = ImageTk.PhotoImage(Image.open(os.path.join(self.outdir, 'reference_frame_anchor.jpg')))
         h = self.im.height()
         w = self.im.width()
         self.shape0 = [h, w]
@@ -170,8 +169,6 @@ class StrokeCanvas():
         self.canvas.update()
         self.export_canvas = Image.new('RGB', (2560, 1600), (0, 0, 0))
         self.export_drawer = ImageDraw.Draw(self.export_canvas)
-        # except:
-            # tkinter.messagebox.showinfo("Error", "No Image Selected")
 
     def choose_red(self):
 	    self.pen_color = 'red'
@@ -187,8 +184,8 @@ class StrokeCanvas():
         settings_frame = Frame(self.master, bg='white', height=self.canvas.winfo_screenheight(), width=250)
         settings_window = self.canvas.create_window(0, 0, anchor=NW, window=settings_frame)
 
-        image_button = TkinterCustomButton(text="Select Image", corner_radius=10, command=self.select_image, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
-        image_button_window = self.canvas.create_window(250/2, 100, anchor=CENTER, window=image_button)
+        # image_button = TkinterCustomButton(text="Select Image", corner_radius=10, command=self.select_image, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
+        # image_button_window = self.canvas.create_window(250/2, 100, anchor=CENTER, window=image_button)
 
         red = TkinterCustomButton(text="", width=50, height=50, fg_color="red", corner_radius=10, hover_color="red", bg_color="white", command=self.choose_red)
         red_window = self.canvas.create_window(250/2, 200, anchor=CENTER, window=red)

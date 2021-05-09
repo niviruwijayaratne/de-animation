@@ -1,5 +1,5 @@
 ioParams:
-  inputPath: ./inputs/grasshopper.mp4
+  inputPath: ./inputs/bai_guitar.mp4
   outputDir: outputs
   maxFrames: 25 # -1 if processing entire video, 
 

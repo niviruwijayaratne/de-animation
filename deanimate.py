@@ -320,19 +320,19 @@ class LeastSquaresSolver:
 
                 dst = np.array([[y_tl, x_tl], [y_tr, x_tr], [y_bl, x_bl], [y_br, x_br]])
                 src = np.array([[y_tl_o, x_tl_o], [y_tr_o, x_tr_o], [y_bl_o, x_bl_o], [y_br_o, x_br_o]])
-
+                # np.save('../src.npy', src)
+                # np.save('../dst.npy', dst)
+                # sys.exit()
                 transform = self.get_transform(src, dst)
                 for y in range(int(np.rint(y_tl)), int(np.rint(y_bl))):
                     for x in range(int(np.rint(x_tl)), int(np.rint(x_tr))):
                         transformed_point = np.dot(transform, np.array([y, x, 1]))
                         transformed_point /= transformed_point[-1]
-                        transformed_point = np.rint(transformed_point).astype(np.int64)
                         transformed_point[np.where(transformed_point < 0)] = 0
                         transformed_point[0] = min(transformed_point[0], frame.shape[0] - 1)
                         transformed_point[1] = min(transformed_point[1], frame.shape[1] - 1)
-                        intensity = frame[transformed_point[0], transformed_point[1], :] 
+                        intensity = frame[int(transformed_point[0]), int(transformed_point[1]), :] 
                         warped_frame[y, x, :] = intensity
-
                 if (i + 2) % (64*32*2) == 0:
                     # print("Writing Frame: ", counter)
                     pbar.update(1)
@@ -348,22 +348,39 @@ class LeastSquaresSolver:
         vid.release()
 
     def get_transform(self, src, dst):
-        '''
-        Helper function to calculate quad-to-quad transforms for texture mapping.
-        '''
-        A = np.zeros((src.shape[0]*2, 9))
-        for i in range(0, A.shape[0], 2):
-            u, v = np.squeeze(src[int(i/2)])
-            u_, v_ = np.squeeze(dst[int(i/2)])
+        src = np.squeeze(src)
+        dst = np.squeeze(dst)
+        src = np.hstack([src, np.ones((src.shape[0], 1))])
+        dst = np.hstack([dst, np.ones((dst.shape[0], 1))])
 
-            A[i] = [-u, -v, -1, 0, 0, 0, u*u_, v*u_, u_]
-            A[i + 1] = [0, 0, 0, -u, -v, -1, u*v_, v*v_, v_]
+        src_consts = np.dot(np.linalg.inv(src.T[:, :-1]), src.T[:, -1]).reshape(1, -1)
+        A = src.T[:, :-1]*src_consts
 
-        U,S,V_t = scipy.linalg.svd(A)
-        T = V_t[-1]
-        T = T.reshape((3,3))
+        dst_consts = np.dot(np.linalg.inv(dst.T[:, :-1]), dst.T[:, -1]).reshape(1, -1)
+        B = dst.T[:, :-1]*dst_consts
+
+        T = np.dot(B, np.linalg.inv(A))
         T_inv = np.linalg.inv(T)
+
         return T_inv
+
+    # def get_transform(self, src, dst):
+    #     '''
+    #     Helper function to calculate quad-to-quad transforms for texture mapping.
+    #     '''
+    #     A = np.zeros((src.shape[0]*2, 9))
+    #     for i in range(0, A.shape[0], 2):
+    #         u, v = np.squeeze(src[int(i/2)])
+    #         u_, v_ = np.squeeze(dst[int(i/2)])
+
+    #         A[i] = [-u, -v, -1, 0, 0, 0, u*u_, v*u_, u_]
+    #         A[i + 1] = [0, 0, 0, -u, -v, -1, u*v_, v*v_, v_]
+
+    #     U,S,V_t = scipy.linalg.svd(A)
+    #     T = V_t[-1]
+    #     T = T.reshape((3,3))
+    #     T_inv = np.linalg.inv(T)
+    #     return T_inv
         
     def run(self):
         '''
