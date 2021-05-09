@@ -337,7 +337,7 @@ class LeastSquaresSolver:
                     # print("Writing Frame: ", counter)
                     pbar.update(1)
                     writer.write(warped_frame)
-                    warped_frame = np.zeros_like(frame)
+                    # warped_frame = np.zeros_like(frame)
                     counter += 1
                     ret, frame = vid.read()
                     if not ret:
