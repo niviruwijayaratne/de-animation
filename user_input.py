@@ -7,9 +7,10 @@ import cv2
 import numpy as np
 import math
 import time
+import os
 
 class StrokeCanvas():
-    def __init__(self):
+    def __init__(self, inputPath, outdir):
         self.master = Tk()
         self.im = None
         self.bg_color = "black"
@@ -30,6 +31,13 @@ class StrokeCanvas():
         self.red_positions = []
         self.blue_positions = []
         self.destroy = False
+        self.outdir = outdir
+        
+        vid = cv2.VideoCapture(inputPath)
+        ret, frame = vid.read()
+        cv2.imwrite(os.path.join(self.outdir, 'reference_frame_anchor.jpg'), frame)
+        vid.release()
+
         self.set_dims()
         self.create_widgets()
         
@@ -63,15 +71,11 @@ class StrokeCanvas():
                     self.b[self.pen_thickness].append((self.x0, self.y0))
                     self.b[self.pen_thickness].append((e.x, e.y))
 
-            # self.green_positions.append([self.x0, self.y0])
-            # self.green_positions.append([e.x, e.y])
             self.drawings.append(self.canvas.create_line(self.x0,self.y0, e.x, e.y, 
                                 width=self.pen_thickness, fill=self.pen_color, capstyle=ROUND, smooth=True, joinstyle=ROUND))
         self.x0 = e.x
         self.y0 = e.y
-
-
-    
+        
     def clear_canvas(self):
         for line in self.drawings:
             self.canvas.delete(line)
@@ -87,6 +91,10 @@ class StrokeCanvas():
         return self.y_coords, self.x_coords
 
     def save_image(self):
+        if not self.drawings:
+            tkinter.messagebox.showinfo("Try Again", "Please draw de-animation strokes on the image")
+            return
+
         for thickness, points in self.r.items():
             self.export_drawer.line(points, fill='red', width=thickness, joint='curve')
         for thickness, points in self.g.items():
@@ -95,7 +103,7 @@ class StrokeCanvas():
             self.export_drawer.line(points, fill='blue', width=thickness, joint='curve')
 
         try:
-            out_canvas = "results/canvas.png"
+            out_canvas = os.path.join(self.outdir, "canvas.png")
             self.export_canvas.save(out_canvas)
             mask = np.zeros((self.im.height(), self.im.width()))
             coords = self.canvas.coords(self._id)
@@ -111,8 +119,6 @@ class StrokeCanvas():
             
             strokes = cv2.imread(out_canvas)
             y_coords, x_coords = np.where(strokes[y_s:y_f, x_s:x_f])[:2]
-            # np.save('y_coords.npy', y_coords)
-            # np.save('x_coords.npy', x_coords)
             mask[np.where(strokes[y_s:y_f, x_s:x_f])[:2]] = 1
             mask = np.dstack([mask, mask, mask])
             strokes = np.multiply(mask, strokes[y_s:y_f, x_s: x_f])
@@ -126,12 +132,15 @@ class StrokeCanvas():
             out_image = cv2.resize(out_image, (self.shape0[1], self.shape0[0]), interpolation=cv2.INTER_AREA)
             strokes = cv2.resize(strokes, (self.shape0[1], self.shape0[0]), interpolation=cv2.INTER_AREA)
             y_coords, x_coords = np.where(strokes)[:2]
-            np.save('results/y_coords.npy', y_coords)
-            np.save('results/x_coords.npy', x_coords)
-            cv2.imwrite('results/out_composite.jpg', out_image)
-            tkinter.messagebox.showinfo("Success", "Image Saved, Close Window")
+            np.save(os.path.join(self.outdir, 'y_coords.npy'), y_coords)
+            np.save(os.path.join(self.outdir, 'x_coords.npy'), x_coords)
+            cv2.imwrite(os.path.join(self.outdir, 'out_composite.jpg'), out_image)
+            tkinter.messagebox.showinfo("Success", "Image Saved")
+            self.destroy = True
+            self.canvas.pack_forget()
+            self.canvas.destroy()
+            self.master.destroy()
 
-            
         except Exception as e:
             print(e)
             tkinter.messagebox.showinfo("Error", "Image not Saved")
@@ -200,8 +209,6 @@ class StrokeCanvas():
         t = TkinterCustomButton(text="Export Image", corner_radius=10, command=self.save_image, bg_color="white", text_font=("Avenir", 20), width=130, height=45)
         tt = self.canvas.create_window(250/2, 700, anchor=CENTER, window=t)
 
-        # t2 = Button(text="Close", command=self.master.quit)
-        # tl = self.canvas.create_window(250/2, 800, anchor=CENTER, window=t2)
 
 class TkinterCustomButton(tkinter.Frame):
     """ tkinter custom button with border, rounded corners and hover effect
@@ -459,21 +466,23 @@ class TkinterCustomButton(tkinter.Frame):
             self.image_label.configure(bg=self.hover_color)
 
     def on_leave(self, event=0):
-        for part in self.canvas_fg_parts:
-            self.canvas.itemconfig(part, fill=self.fg_color, width=0)
+        # for part in self.canvas_fg_parts:
+        #     self.canvas.itemconfig(part, fill=self.fg_color, width=0)
 
-        if self.text_label is not None:
-            # change background color of image_label
-            self.text_label.configure(bg=self.fg_color)
+        # if self.text_label is not None:
+        #     # change background color of image_label
+        #     self.text_label.configure(bg=self.fg_color)
 
-        if self.image_label is not None:
-            # change background color of image_label
-            self.image_label.configure(bg=self.fg_color)
+        # if self.image_label is not None:
+        #     # change background color of image_label
+        #     self.image_label.configure(bg=self.fg_color)
+        return
 
     def clicked(self, event=0):
         if self.function is not None:
             self.function()
             self.on_leave()
 
-t = StrokeCanvas()
-t.master.mainloop()
+# t = StrokeCanvas()
+# t.master.mainloop()
+# t.master.destroy()

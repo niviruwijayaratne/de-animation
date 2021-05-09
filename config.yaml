@@ -1,7 +1,7 @@
 ioParams:
-  inputPath: ./inputs/bai_guitar.mp4
-  outputPath: mk.mov
-  intermediateResults: False
+  inputPath: ./inputs/grasshopper.mp4
+  outputDir: outputs
+  maxFrames: 25 # -1 if processing entire video, 
 
 featureParams:
   maxCorners: 1000

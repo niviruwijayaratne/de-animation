@@ -8,177 +8,144 @@ import yaml
 import argparse
 import sys
 import time
+import os
+import tqdm
+from user_input import StrokeCanvas
+
 
 class LeastSquaresSolver:
     def __init__(self, tracker):
         self.tracker = tracker
-        self.ka = None
+        self.ka = {"anchor": None, "floating": None}
         self.vertices = None
-        self.weights_and_verts = None
-        self.non_solved_verts = None 
+        self.weights_and_verts = {"anchor": None, "floating": None}
+        self.non_solved_verts = {"anchor": None, "floating": None}
         self.processed_quads = None
-        self.temporal_weight_mat = None
+        self.temporal_weight_mat = {"anchor": None, "floating": None}
         
-        self.get_temporal_weights()
-        self.pre_process()
-        v_prime = self.energy_function_lsq()
-        self.draw_rectangles(v_prime)
-        self.texture_map(v_prime)
-
     def pre_process(self):
-        num_s = self.tracker.feature_table.shape[0]
-        num_t = self.tracker.feature_table.shape[1]
-        self.ka = self.tracker.feature_table.transpose(1, 0, 2)[0].reshape(-1, 2)
-        self.ka = self.tracker.feature_table.transpose(1, 0, 2)[0].reshape(-1, 1)
-        self.ka = np.tile(self.ka, (num_t, 1))
-        assert(self.ka.shape == (num_s*num_t*2, 1))
+        '''
+        Pre-processes outputs from tracking to simplify least squares problem.
+        '''
+        mode = self.tracker.mode
+        if mode == "anchor":    
+            num_s = self.tracker.feature_table["anchor"].shape[0]
+            num_t = self.tracker.feature_table["anchor"].shape[1]
+            self.ka[mode] = self.tracker.feature_table[mode].transpose(1, 0, 2)[0].reshape(-1, 2)
+            self.ka[mode] = self.tracker.feature_table[mode].transpose(1, 0, 2)[0].reshape(-1, 1)
+            self.ka[mode] = np.tile(self.ka[mode], (num_t, 1))
+            assert(self.ka[mode].shape == (num_s*num_t*2, 1))
 
-        self.processed_quads = np.zeros((64*32, 4))
-        self.tracker.vertices = self.tracker.vertices.reshape(-1, 2)
-        for i, quad in enumerate(self.tracker.quads):
-            quad_idxs = []
-            for vert in quad:
-                quad_idxs.append(np.where((self.tracker.vertices == vert).all(axis=1))[0][0])
-            self.processed_quads[i, :] = quad_idxs
+            self.processed_quads = np.zeros((64*32, 4))
+            vertices = self.tracker.vertices.reshape(-1, 2)
+            for i, quad in enumerate(self.tracker.quads):
+                quad_idxs = []
+                for vert in quad:
+                    quad_idxs.append(np.where((vertices == vert).all(axis=1))[0][0])
+                self.processed_quads[i, :] = quad_idxs
 
-        assert(self.processed_quads.shape == (64*32, 4))
-        self.processed_quads = np.tile(self.processed_quads, (num_t, 1))
-        assert(self.processed_quads.shape == (64*32*num_t, 4))
-        for i in range(0, self.processed_quads.shape[0], 64*32):
-            self.processed_quads[i:(64*32)*(int(i/2048) + 1), :] += len(self.tracker.vertices)*(int(i/2048))
-        self.processed_quads = np.repeat(self.processed_quads, 2, axis=0)
-        assert(self.processed_quads.shape == (64*32*2*num_t, 4))
-        self.processed_quads *= 2
-        self.processed_quads[np.arange(1, self.processed_quads.shape[0] + 1, 2)] += 1
-        self.processed_quads = self.processed_quads.astype(np.int64)
+            assert(self.processed_quads.shape == (64*32, 4))
+            self.processed_quads = np.tile(self.processed_quads, (num_t, 1))
+            assert(self.processed_quads.shape == (64*32*num_t, 4))
+            for i in range(0, self.processed_quads.shape[0], 64*32):
+                self.processed_quads[i:(64*32)*(int(i/2048) + 1), :] += len(vertices)*(int(i/2048))
+            self.processed_quads = np.repeat(self.processed_quads, 2, axis=0)
+            assert(self.processed_quads.shape == (64*32*2*num_t, 4))
+            self.processed_quads *= 2
+            self.processed_quads[np.arange(1, self.processed_quads.shape[0] + 1, 2)] += 1
+            self.processed_quads = self.processed_quads.astype(np.int64)
 
-        self.vertices = self.tracker.vertices.reshape(-1, 1)
-        assert(self.vertices.shape == (65*33*2, 1))
-        self.vertices = np.tile(self.vertices, (num_t, 1))
-        assert(self.vertices.shape == (65*33*2*num_t, 1))
-        self.weights_and_verts = self.tracker.weights_and_verts.reshape(-1, 2, 4)
-        assert(self.weights_and_verts.shape == (num_s*num_t, 2, 4))
-        self.weights_and_verts = np.repeat(self.weights_and_verts, 2, axis=0)
-        assert(self.weights_and_verts.shape == (num_s*num_t*2, 2, 4))
-        self.weights_and_verts[:, 1, :] *= 2
-        x_coords = np.arange(1, self.weights_and_verts.shape[0] + 1, 2).astype(np.int64)
-        self.weights_and_verts[x_coords, 1, :] += 1
-        self.non_solved_verts = []
+            self.vertices = vertices.reshape(-1, 1)
+            assert(self.vertices.shape == (65*33*2, 1))
+            self.vertices = np.tile(self.vertices, (num_t, 1))
+            assert(self.vertices.shape == (65*33*2*num_t, 1))
+
+            self.weights_and_verts[mode] = self.tracker.weights_and_verts[mode].reshape(-1, 2, 4)
+            assert(self.weights_and_verts[mode].shape == (num_s*num_t, 2, 4))
+            self.weights_and_verts[mode] = np.repeat(self.weights_and_verts[mode], 2, axis=0)
+            assert(self.weights_and_verts[mode].shape == (num_s*num_t*2, 2, 4))
+            self.weights_and_verts[mode][:, 1, :] *= 2
+            x_coords = np.arange(1, self.weights_and_verts[mode].shape[0] + 1, 2).astype(np.int64)
+            self.weights_and_verts[mode][x_coords, 1, :] += 1
+
+        else:
+            num_s = self.tracker.feature_table["floating"].shape[0]
+            num_t = self.tracker.feature_table["floating"].shape[1]
+            self.weights_and_verts[mode] = self.tracker.weights_and_verts[mode].transpose(1, 0, 2, 3)
+            assert(self.weights_and_verts[mode].shape == (num_s, num_t, 2, 4))
+            self.weights_and_verts[mode] = np.hstack([self.weights_and_verts[mode][:, :-1, :, :].reshape(-1, 2, 4), self.weights_and_verts[mode][:, 1:, :, :].reshape(-1, 2, 4)])
+            assert(self.weights_and_verts[mode].shape == (num_s*(num_t - 1), 4, 4)) #weights t, verts t, weights t+1, verts t + 1
+            self.weights_and_verts[mode] = np.repeat(self.weights_and_verts[mode], 2, axis=0)
+            assert(self.weights_and_verts[mode].shape == (num_s*(num_t - 1)*2, 4, 4))
+            self.weights_and_verts[mode][:, 1, :] *= 2
+            self.weights_and_verts[mode][:, 3, :] *= 2
+            x_coords = np.arange(1, self.weights_and_verts[mode].shape[0] + 1, 2).astype(np.int64)
+            self.weights_and_verts[mode][x_coords, 1, :] += 1
+            self.weights_and_verts[mode][x_coords, 3, :] += 1
+
+        self.non_solved_verts[mode] = []
         vers = np.arange(0, self.vertices.shape[0], 1)
-        reshaped_idxs = np.unique(self.weights_and_verts[:, 1, :].reshape(-1, 1), axis=0)
+        reshaped_idxs = np.unique(self.weights_and_verts[mode][:, 1, :].reshape(-1, 1), axis=0)
         for v in vers:
             if v not in reshaped_idxs:
-                self.non_solved_verts.append(v)
-        self.non_solved_verts = np.array(self.non_solved_verts).reshape(-1, 1)
-        self.temporal_weight_mat = self.temporal_weight_mat.transpose(1, 0).reshape(-1, 1)
-        self.temporal_weight_mat = np.repeat(self.temporal_weight_mat, 2, axis=0)
-
-    def draw_rectangles(self, v_prime):
-        print("drawing")
-        f = cv2.imread('inputs/reference_frame.jpg')
-        vid = cv2.VideoCapture(self.tracker.inputPath)
-        count = 0
-        h, w = self.tracker.reference_frame.shape[0], self.tracker.reference_frame.shape[1]
-        writer = cv2.VideoWriter("results/bai_guitar_mesh.mp4" ,cv2.VideoWriter_fourcc(*'mp4v'), vid.get(cv2.CAP_PROP_FPS), (w, h))
-        counter = 0
-        for i in range(0, self.processed_quads.shape[0], 2):
-            y_tl = v_prime[self.processed_quads[i][0]]
-            x_tl = v_prime[self.processed_quads[i + 1][0]]
-
-            y_tr = v_prime[self.processed_quads[i][1]]
-            x_tr = v_prime[self.processed_quads[i + 1][1]]
-
-            y_bl = v_prime[self.processed_quads[i][2]]
-            x_bl = v_prime[self.processed_quads[i + 1][2]]
-
-            y_br = v_prime[self.processed_quads[i][3]]
-            x_br = v_prime[self.processed_quads[i + 1][3]]
-            
-            y_tl = int(np.rint(y_tl))
-            x_tl = int(np.rint(x_tl))
-
-            y_tr = int(np.rint(y_tr))
-            x_tr = int(np.rint(x_tr))
-
-            y_bl = int(np.rint(y_bl))
-            x_bl = int(np.rint(x_bl))
-
-            y_br = int(np.rint(y_br))
-            x_br = int(np.rint(x_br))
-
-            cv2.line(f, (x_tl, y_tl), (x_tr, y_tr), (255, 0, 0), 1)
-            cv2.line(f, (x_tr, y_tr), (x_br, y_br), (255, 0, 0), 1)
-            cv2.line(f, (x_br, y_br), (x_bl, y_bl), (255, 0, 0), 1)
-            cv2.line(f, (x_bl, y_bl), (x_tl, y_tl), (255, 0, 0), 1)
-
-            y_tl_o = self.vertices[self.processed_quads[i][0]]
-            x_tl_o = self.vertices[self.processed_quads[i + 1][0]]
-            
-            y_tr_o = self.vertices[self.processed_quads[i][1]]
-            x_tr_o = self.vertices[self.processed_quads[i + 1][1]]
-
-            y_bl_o = self.vertices[self.processed_quads[i][2]]
-            x_bl_o = self.vertices[self.processed_quads[i + 1][2]]
-
-            y_br_o = self.vertices[self.processed_quads[i][3]]
-            x_br_o = self.vertices[self.processed_quads[i + 1][3]]
-
-            if (i + 2) % (64*32*2) == 0:
-                counter += 1
-                writer.write(f)
-                f = cv2.imread('inputs/reference_frame.jpg')
-        writer.release()
-    
-    def get_temporal_weights(self):
-        '''
-        Input: num_features x num_frames x 2 matrix
-        Return: num_features x num_frames matrix where each row corresponds to a feature and 
-        each index gives the temporal weight of the feature at that frame index
-        '''
-        s, t = self.tracker.feature_table.shape[0], self.tracker.feature_table.shape[1]
-        self.temporal_weight_mat = np.zeros((s, t))
-        T = 15
-        eps = 1e-2
-        for s_i in range(s):
-            time_frame = np.where(self.tracker.feature_table[s_i] != None)
-            t_start = time_frame[0][0]
-            t_end = time_frame[0][-1]
-            
-            for t_i in range(t):
-                #check if track
-                feature = self.tracker.feature_table[s_i, t_i]
-                if (feature != None).all():
-                    #apply piecewise function
-                    if ( (t_i >= t_start) and (t_i < t_start + T) ):
-                        self.temporal_weight_mat[s_i, t_i] = ((t_i - t_start) / T)
-                    elif ( (t_i >= t_start + T) and (t_i <= t_end - T) ):
-                        self.temporal_weight_mat[s_i, t_i] = 1
-                    else:
-                        self.temporal_weight_mat[s_i, t_i] = ((t_end - t_i) / T)
+                self.non_solved_verts[mode].append(v)
+        self.non_solved_verts[mode] = np.array(self.non_solved_verts[mode]).reshape(-1, 1)
+        if mode == "floating":
+            self.non_solved_verts["floating"] = np.intersect1d(self.non_solved_verts["anchor"], self.non_solved_verts["floating"]).reshape(-1, 1)
+        
+        self.temporal_weight_mat[mode] = self.temporal_weight_mat[mode].transpose(1, 0).reshape(-1, 1)
+        self.temporal_weight_mat[mode] = np.repeat(self.temporal_weight_mat[mode], 2, axis=0)
 
     def energy_function_lsq(self):
-        num_s = self.tracker.feature_table.shape[0]
-        num_t = self.tracker.feature_table.shape[1]
-        ea_rows = self.ka.shape[0] + self.non_solved_verts.shape[0]     
-        es_rows = 64*32*8*2*num_t
+        '''
+        Minimize energy functions (3) and (5) using least squares, as outlined in paper.
+        Returns (65*33*2* #frames) x 1 array where every 2 indices forms a vertex (y, x) 
+        pair (for easy indexing).
+        '''
+        mode = self.tracker.mode
+        num_s_a = self.tracker.feature_table["anchor"].shape[0]
+        num_t_a = self.tracker.feature_table["anchor"].shape[1]
+        num_s_f = None
+        num_t_f = None
+        if mode == "floating":
+            num_s_f = self.weights_and_verts["floating"].shape[0]
+            num_t_f = self.weights_and_verts["floating"].shape[1]
 
+        if mode == "anchor":    
+            ea_rows = self.ka["anchor"].shape[0] + self.non_solved_verts["anchor"].shape[0]     
+        else:
+            ea_rows = self.ka["anchor"].shape[0] + self.non_solved_verts["floating"].shape[0] + self.weights_and_verts["floating"].shape[0]
+
+        es_rows = 64*32*8*2*num_t_a
         ka_final = np.zeros((ea_rows+es_rows, 1))
-        ka_final[:self.ka.shape[0]] = np.multiply(self.ka, np.sqrt(self.temporal_weight_mat))
+        ka_final[:self.ka["anchor"].shape[0]] = np.multiply(self.ka["anchor"], np.sqrt(self.temporal_weight_mat["anchor"]))
         A = scipy.sparse.lil_matrix((ea_rows + es_rows, len(self.vertices)))
         
-        #Create K_a equations
-        print("Started E_a Equations")
-        idxs = np.arange(0, self.weights_and_verts.shape[0], 1).reshape(-1, 1)
-        vert_idxs = np.squeeze(self.weights_and_verts[idxs, 1].astype(np.int64))
-        weights = np.squeeze(self.weights_and_verts[idxs, 0])
-        A[idxs, vert_idxs] = np.multiply(weights, np.sqrt(self.temporal_weight_mat))
+        print('\r' + "Setting up Least Squares...", end = "")
+        idxs = np.arange(0, self.weights_and_verts["anchor"].shape[0], 1).reshape(-1, 1)
+        vert_idxs = np.squeeze(self.weights_and_verts["anchor"][idxs, 1].astype(np.int64))
+        weights = np.squeeze(self.weights_and_verts["anchor"][idxs, 0])
+        A[idxs, vert_idxs] = np.multiply(weights, np.sqrt(self.temporal_weight_mat["anchor"]))
         
-        print("Started NSV Equations")
-        idxs = np.arange(self.weights_and_verts.shape[0], self.non_solved_verts.shape[0] + self.weights_and_verts.shape[0], 1).reshape(-1, 1)
-        A[idxs, self.non_solved_verts] = 1
-        ka_final[idxs] = self.vertices[self.non_solved_verts]
+        # print("Started NSV Equations")
+        idxs = np.arange(self.weights_and_verts["anchor"].shape[0], self.non_solved_verts[mode].shape[0] + self.weights_and_verts["anchor"].shape[0], 1).reshape(-1, 1)
+        A[idxs, self.non_solved_verts[mode]] = 1
+        ka_final[idxs] = self.vertices[self.non_solved_verts[mode]]
+
+        if mode == "floating":
+            # print("Starting E_f Equations")
+            curr_idx = self.non_solved_verts[mode].shape[0] + self.weights_and_verts["anchor"].shape[0]
+            idxs = np.arange(curr_idx, curr_idx + self.weights_and_verts["floating"].shape[0], 1).reshape(-1, 1, 1)
+            vert_idxs = np.squeeze(self.weights_and_verts["floating"][idxs - curr_idx, [1, 3]]).reshape(-1, 8)
+            weights = np.squeeze(self.weights_and_verts["floating"][idxs - curr_idx, [0, 2]])
+            weights[:, 1, :] *= -1
+            weights = weights.reshape(-1, 8)
+            weights = np.multiply(weights, np.sqrt(self.temporal_weight_mat[mode]))
+            idxs = idxs.reshape(-1, 1)
+            A[idxs, vert_idxs] = weights
+
         
-        print("Started E_s Equations")
+        # print("Started E_s Equations")
         ea_offset = ea_rows
 
         es_idxs_y = (np.arange(0, es_rows, 16)/8).astype(np.int64).reshape(-1, 1)
@@ -196,97 +163,194 @@ class LeastSquaresSolver:
         x_js = y_js + 1
         A[y_js, y_idxs] = np.array([1, -1, -1, 1])*np.sqrt(4)/np.sqrt(8)
         A[x_js, x_idxs] = np.array([1, -1, -1, 1])*np.sqrt(4)/np.sqrt(8)
-        
-        print("Solving")
+        print("Set Up!")
+
+        print('\r' + "Solving for Mesh...", end = "")
         v_prime = scipy.sparse.linalg.lsqr(A.tocsr(), ka_final) # solve w/ csr
+        print("Solved!")
         v_prime = v_prime[0]
-        
         z = 0
         for i in range(0, len(v_prime), 2):
-            if v_prime[i] == 0:
+            if v_prime[i] <= 0:
                 z += 1
-            if v_prime[i + 1] == 0:
+            if v_prime[i + 1] <= 0:
                 z += 1
             if v_prime[i] > self.tracker.reference_frame.shape[0]:
                 z += 1
             if v_prime[i + 1] > self.tracker.reference_frame.shape[1]:
                 z += 1
+            if np.isnan(v_prime[i]) or v_prime[i] is None:
+                z += 1
+            if np.isnan(v_prime[i + 1]) or v_prime[i + 1] is None:
+                z += 1
         
         print(str(100 - (z/len(v_prime)*100)) + "% Valid Points")
         return v_prime
 
+    def get_temporal_weights(self):
+        '''
+        Creates array of temporal weights based on temporal weighting function
+        l(s, t) as outlined in Liu et. al. Returns # features x # frames array
+        where each row corresponds to the temporal weights of a feature and each
+        index in that row gives the temporal weight of that feature in that frame
+        '''
+        mode = self.tracker.mode
+        s, t = self.tracker.feature_table[mode].shape[0], self.tracker.feature_table[mode].shape[1]
+        if mode == "floating":
+            t -= 1
+        self.temporal_weight_mat[mode] = np.zeros((s, t))
+        T = 15
+        eps = 1e-2
+        for s_i in range(s):
+            time_frame = np.where(self.tracker.feature_table[mode][s_i] != None)
+            t_start = time_frame[0][0]
+            t_end = time_frame[0][-1]
+            for t_i in range(t):
+                #check if track
+                feature = self.tracker.feature_table[mode][s_i, t_i]
+                if (feature != None).all():
+                    if ( (t_i >= t_start) and (t_i < t_start + T) ):
+                        self.temporal_weight_mat[mode][s_i, t_i] = ((t_i - t_start) / T)
+                    elif ( (t_i >= t_start + T) and (t_i <= t_end - T) ):
+                        self.temporal_weight_mat[mode][s_i, t_i] = 1
+                    else:
+                        self.temporal_weight_mat[mode][s_i, t_i] = ((t_end - t_i) / T)
+
+    def draw_rectangles(self, v_prime):
+        '''
+        Draws warped mesh over input video.
+        '''
+        vid = cv2.VideoCapture(self.tracker.inputPath[self.tracker.mode])
+        ret, frame = vid.read()
+        count = 0
+        h, w = self.tracker.reference_frame.shape[0], self.tracker.reference_frame.shape[1]
+        out_name = self.tracker.inputPath['anchor'].split("/")[-1].split(".")[0] + "_" + self.tracker.mode \
+            + "_mesh." + self.tracker.inputPath['anchor'].split("/")[-1].split(".")[-1]                    
+        out_path = os.path.join(self.tracker.outdir, out_name)
+        writer = cv2.VideoWriter(out_path ,cv2.VideoWriter_fourcc(*'mp4v'), vid.get(cv2.CAP_PROP_FPS), (w, h))
+        with tqdm.tqdm(total=int(self.processed_quads.shape[0]/(64*32*2)), file=sys.stdout, desc="Drawing Mesh", ncols = 85) as pbar:
+            for i in range(0, self.processed_quads.shape[0], 2):
+                y_tl = v_prime[self.processed_quads[i][0]]
+                x_tl = v_prime[self.processed_quads[i + 1][0]]
+
+                y_tr = v_prime[self.processed_quads[i][1]]
+                x_tr = v_prime[self.processed_quads[i + 1][1]]
+
+                y_bl = v_prime[self.processed_quads[i][2]]
+                x_bl = v_prime[self.processed_quads[i + 1][2]]
+
+                y_br = v_prime[self.processed_quads[i][3]]
+                x_br = v_prime[self.processed_quads[i + 1][3]]
+                
+                y_tl = int(np.rint(y_tl))
+                x_tl = int(np.rint(x_tl))
+
+                y_tr = int(np.rint(y_tr))
+                x_tr = int(np.rint(x_tr))
+
+                y_bl = int(np.rint(y_bl))
+                x_bl = int(np.rint(x_bl))
+
+                y_br = int(np.rint(y_br))
+                x_br = int(np.rint(x_br))
+
+                cv2.line(frame, (x_tl, y_tl), (x_tr, y_tr), (255, 0, 0), 1)
+                cv2.line(frame, (x_tr, y_tr), (x_br, y_br), (255, 0, 0), 1)
+                cv2.line(frame, (x_br, y_br), (x_bl, y_bl), (255, 0, 0), 1)
+                cv2.line(frame, (x_bl, y_bl), (x_tl, y_tl), (255, 0, 0), 1)
+
+                y_tl_o = self.vertices[self.processed_quads[i][0]]
+                x_tl_o = self.vertices[self.processed_quads[i + 1][0]]
+                
+                y_tr_o = self.vertices[self.processed_quads[i][1]]
+                x_tr_o = self.vertices[self.processed_quads[i + 1][1]]
+
+                y_bl_o = self.vertices[self.processed_quads[i][2]]
+                x_bl_o = self.vertices[self.processed_quads[i + 1][2]]
+
+                y_br_o = self.vertices[self.processed_quads[i][3]]
+                x_br_o = self.vertices[self.processed_quads[i + 1][3]]
+
+                if (i + 2) % (64*32*2) == 0:
+                    pbar.update(1)
+                    writer.write(frame)
+                    ret, frame = vid.read()
+                    # f = cv2.imread('inputs/reference_frame.jpg')
+        vid.release()
+        writer.release()
+
     def texture_map(self, v_prime):
-        print("texture mapping")
-        vid = cv2.VideoCapture(self.tracker.inputPath)
-        ret, frame = vid.read()    
-        writer = cv2.VideoWriter("results/bai_guitar.mp4" ,cv2.VideoWriter_fourcc(*'mp4v'), vid.get(cv2.CAP_PROP_FPS), (frame.shape[1], frame.shape[0]))
+        '''
+        Texture maps input video to output mesh.
+        '''
+        vid = cv2.VideoCapture(self.tracker.inputPath[self.tracker.mode])
+        ret, frame = vid.read() 
+        out_name = self.tracker.inputPath['anchor'].split("/")[-1].split(".")[0] + "_" + self.tracker.mode + "_texture_mapped." \
+                    + self.tracker.inputPath['anchor'].split("/")[-1].split(".")[-1]
+        out_path = os.path.join(self.tracker.outdir, out_name)
+        writer = cv2.VideoWriter(out_path ,cv2.VideoWriter_fourcc(*'mp4v'), vid.get(cv2.CAP_PROP_FPS), (frame.shape[1], frame.shape[0]))
         warped_frame = np.zeros_like(frame)
-        max_x = 0
-        max_y = 0
-        max_px = 0
-        max_py = 0
+
         counter = 0
-        ns = False
-        for i in range(0, self.processed_quads.shape[0], 2):
-            y_tl = v_prime[self.processed_quads[i][0]]
-            x_tl = v_prime[self.processed_quads[i + 1][0]]
+        with tqdm.tqdm(total=int(self.processed_quads.shape[0]/(64*32*2)), file=sys.stdout, desc="Texture Mapping", ncols = 85) as pbar:
+            for i in range(0, self.processed_quads.shape[0], 2):
+                y_tl = v_prime[self.processed_quads[i][0]]
+                x_tl = v_prime[self.processed_quads[i + 1][0]]
 
-            y_tr = v_prime[self.processed_quads[i][1]]
-            x_tr = v_prime[self.processed_quads[i + 1][1]]
+                y_tr = v_prime[self.processed_quads[i][1]]
+                x_tr = v_prime[self.processed_quads[i + 1][1]]
 
-            y_bl = v_prime[self.processed_quads[i][2]]
-            x_bl = v_prime[self.processed_quads[i + 1][2]]
+                y_bl = v_prime[self.processed_quads[i][2]]
+                x_bl = v_prime[self.processed_quads[i + 1][2]]
 
-            y_br = v_prime[self.processed_quads[i][3]]
-            x_br = v_prime[self.processed_quads[i + 1][3]]
+                y_br = v_prime[self.processed_quads[i][3]]
+                x_br = v_prime[self.processed_quads[i + 1][3]]
 
-            y_tl_o = self.vertices[self.processed_quads[i][0]]
-            x_tl_o = self.vertices[self.processed_quads[i + 1][0]]
-            
-            y_tr_o = self.vertices[self.processed_quads[i][1]]
-            x_tr_o = self.vertices[self.processed_quads[i + 1][1]]
+                y_tl_o = self.vertices[self.processed_quads[i][0]]
+                x_tl_o = self.vertices[self.processed_quads[i + 1][0]]
+                
+                y_tr_o = self.vertices[self.processed_quads[i][1]]
+                x_tr_o = self.vertices[self.processed_quads[i + 1][1]]
 
-            y_bl_o = self.vertices[self.processed_quads[i][2]]
-            x_bl_o = self.vertices[self.processed_quads[i + 1][2]]
+                y_bl_o = self.vertices[self.processed_quads[i][2]]
+                x_bl_o = self.vertices[self.processed_quads[i + 1][2]]
 
-            y_br_o = self.vertices[self.processed_quads[i][3]]
-            x_br_o = self.vertices[self.processed_quads[i + 1][3]]
+                y_br_o = self.vertices[self.processed_quads[i][3]]
+                x_br_o = self.vertices[self.processed_quads[i + 1][3]]
 
-            dst = np.array([[y_tl, x_tl], [y_tr, x_tr], [y_bl, x_bl], [y_br, x_br]])
-            src = np.array([[y_tl_o, x_tl_o], [y_tr_o, x_tr_o], [y_bl_o, x_bl_o], [y_br_o, x_br_o]])
+                dst = np.array([[y_tl, x_tl], [y_tr, x_tr], [y_bl, x_bl], [y_br, x_br]])
+                src = np.array([[y_tl_o, x_tl_o], [y_tr_o, x_tr_o], [y_bl_o, x_bl_o], [y_br_o, x_br_o]])
 
-            transform = self.get_transform(src, dst)
-            for y in range(int(np.rint(y_tl)), int(np.rint(y_bl))):
-                for x in range(int(np.rint(x_tl)), int(np.rint(x_tr))):
-                    transformed_point = np.dot(transform, np.array([y, x, 1]))
-                    transformed_point /= transformed_point[-1]
-                    transformed_point = np.rint(transformed_point).astype(np.int64)
-                    transformed_point[np.where(transformed_point < 0)] = 0
-                    transformed_point[0] = min(transformed_point[0], frame.shape[0] - 1)
-                    transformed_point[1] = min(transformed_point[1], frame.shape[1] - 1)
-                    # print(str([y, x]) + " -> " + str(transformed_point))
-                    # cv2.imshow('f', frame)
-                    # cv2.waitKey(0)
-                    intensity = frame[transformed_point[0], transformed_point[1], :] 
-                    warped_frame[y, x, :] = intensity
-                    # if max(max_x, transformed_point[1]) > max_x:
-                    #     max_x = max(max_x, transformed_point[1])
-                    #     max_px = x
-                    # if max(max_y, transformed_point[0]) > max_y:
-                    #     max_y = max(max_y, transformed_point[0])
-                    #     max_py = y
-            # writer.write(frame)
-            if (i + 2) % (64*32*2) == 0:
-                print("Frame: ", counter)
-                writer.write(warped_frame)
-                counter += 1
-                # writer.release()
-                # sys.exit()
-                ret, frame = vid.read()
+                transform = self.get_transform(src, dst)
+                for y in range(int(np.rint(y_tl)), int(np.rint(y_bl))):
+                    for x in range(int(np.rint(x_tl)), int(np.rint(x_tr))):
+                        transformed_point = np.dot(transform, np.array([y, x, 1]))
+                        transformed_point /= transformed_point[-1]
+                        transformed_point = np.rint(transformed_point).astype(np.int64)
+                        transformed_point[np.where(transformed_point < 0)] = 0
+                        transformed_point[0] = min(transformed_point[0], frame.shape[0] - 1)
+                        transformed_point[1] = min(transformed_point[1], frame.shape[1] - 1)
+                        intensity = frame[transformed_point[0], transformed_point[1], :] 
+                        warped_frame[y, x, :] = intensity
+
+                if (i + 2) % (64*32*2) == 0:
+                    # print("Writing Frame: ", counter)
+                    pbar.update(1)
+                    writer.write(warped_frame)
+                    warped_frame = np.zeros_like(frame)
+                    counter += 1
+                    ret, frame = vid.read()
+                    if not ret:
+                        writer.release()
+                        vid.release()
+                        return
         writer.release()
         vid.release()
 
     def get_transform(self, src, dst):
+        '''
+        Helper function to calculate quad-to-quad transforms for texture mapping.
+        '''
         A = np.zeros((src.shape[0]*2, 9))
         for i in range(0, A.shape[0], 2):
             u, v = np.squeeze(src[int(i/2)])
@@ -301,7 +365,34 @@ class LeastSquaresSolver:
         T_inv = np.linalg.inv(T)
         return T_inv
         
-            
+    def run(self):
+        '''
+        Runs entire de-animation pipeline.
+        '''
+        canvas = StrokeCanvas(self.tracker.inputPath["anchor"], self.tracker.outdir)
+        canvas.master.update()
+        while True:
+            if not canvas.destroy:
+                canvas.master.update()
+            else:
+                break
+
+        self.tracker.run()
+        self.get_temporal_weights()
+        self.pre_process()
+        v_prime_anchor = self.energy_function_lsq()
+        self.draw_rectangles(v_prime_anchor)
+        self.texture_map(v_prime_anchor)
+
+        self.tracker.mode = "floating"
+        self.tracker.run()
+        self.get_temporal_weights()
+        self.pre_process()
+        v_prime_floating = self.energy_function_lsq()
+        self.draw_rectangles(v_prime_floating)
+        self.texture_map(v_prime_floating)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -313,10 +404,8 @@ def main():
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     tracker = Tracker(config)
-    print("called run")
-    tracker.run()
-    print("called lsq")
     lsq_solver = LeastSquaresSolver(tracker)
+    lsq_solver.run()
 
 if __name__ == '__main__':
     main()
