@@ -20,7 +20,7 @@ This code was developed on Python 3.7. Run `pip3 install -r requirements.txt` to
 4. Wait for de-animation to finish and see results in `outputDir`
 
 ## Evaluation
-In order to generate the average image for a de-animated video and its RGB pixel variances within the de-animation strokes, run `python3 eval.py --config <path to your config file>` from the command line to obtain the final results.
+In order to generate the average image for a de-animated video and its RGB pixel variances within the de-animation strokes, run `python3 eval.py --config config.yaml` from the command line to obtain the final results.
 
 ## References
 - [Bai, Jiamin, et al. "Selectively de-animating video." ACM Trans. Graph. 31.4 (2012): 66-1.](http://graphics.berkeley.edu/papers/Bai-SDV-2012-08/Bai-SDV-2012-08_large.pdf)

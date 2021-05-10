@@ -320,10 +320,8 @@ class LeastSquaresSolver:
 
                 dst = np.array([[y_tl, x_tl], [y_tr, x_tr], [y_bl, x_bl], [y_br, x_br]])
                 src = np.array([[y_tl_o, x_tl_o], [y_tr_o, x_tr_o], [y_bl_o, x_bl_o], [y_br_o, x_br_o]])
-                # np.save('../src.npy', src)
-                # np.save('../dst.npy', dst)
-                # sys.exit()
                 transform = self.get_transform(src, dst)
+                # bounds = self.get_pixels(dst)
                 for y in range(int(np.rint(y_tl)), int(np.rint(y_bl))):
                     for x in range(int(np.rint(x_tl)), int(np.rint(x_tr))):
                         transformed_point = np.dot(transform, np.array([y, x, 1]))
@@ -337,7 +335,7 @@ class LeastSquaresSolver:
                     # print("Writing Frame: ", counter)
                     pbar.update(1)
                     writer.write(warped_frame)
-                    # warped_frame = np.zeros_like(frame)
+                    warped_frame = np.zeros_like(frame)
                     counter += 1
                     ret, frame = vid.read()
                     if not ret:
@@ -347,7 +345,61 @@ class LeastSquaresSolver:
         writer.release()
         vid.release()
 
+    def get_pixels(self, points):
+        '''
+        Scan conversion for correctly traversing quad pixels.
+        '''
+        points = np.squeeze(points)
+        tri1 = np.array([points[0], points[1], points[2]])
+        tri2 = np.array([points[1], points[2], points[3]])
+
+        pairs1 = np.array([[tri1[1], tri1[0]], [tri1[1], tri1[2]]])
+        pairs2 = np.array([[tri1[0], tri1[1]], [tri1[0], tri1[2]]])
+        edges = [pairs1, pairs2]
+        bounds = {}
+        for edge in edges:
+            dxl = edge[0, 0, 0] - edge[0, 1, 0]
+            dyl = edge[0, 0, 1] - edge[0, 1, 1]
+            slope_l = dyl/dxl
+            intercept_l = edge[0, 0, 1] - edge[0, 0, 0]*slope_l
+            l_val = lambda y: (y - intercept_l)/slope_l
+
+            dxr = edge[1, 0, 0] - edge[1, 1, 0]
+            dyr = edge[1, 0, 1] - edge[1, 1, 1]
+            slope_r = dyr/dxr
+            intercept_r = edge[1, 0, 1] - edge[1, 0, 0]*slope_r
+            r_val = lambda y: (y - intercept_r)/slope_r
+
+            max_y = -float('inf')
+            min_y = float('inf')
+            for pair in edge:
+                for point in pair:
+                    if point[0] < min_y:
+                        min_y = point[0]
+                    if point[0] > max_y:
+                        max_y = point[0]
+            
+            for y in range(int(np.ceil(min_y)), int(np.floor(max_y))):
+                curr_x = l_val(y)
+                if y in bounds:
+                    bounds[y].append(curr_x)
+                else:
+                    bounds[y] = [curr_x]
+                while curr_x <= r_val(y):
+                    curr_x += np.abs(slope_l)
+                    # break
+                bounds[y].append(curr_x)
+
+        for k in bounds.keys():
+            bounds[k] = [int(max(min(bounds[k]), 0)), int(max(bounds[k]))]
+        
+        return bounds
+
+
     def get_transform(self, src, dst):
+        '''
+        Returns transformation matrix that transforms warped quad back to original.
+        '''
         src = np.squeeze(src)
         dst = np.squeeze(dst)
         src = np.hstack([src, np.ones((src.shape[0], 1))])
