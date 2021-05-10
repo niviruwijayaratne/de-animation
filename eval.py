@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import os
 import argparse
-import yaml 
+import yaml
 
 def get_mask(outdir):
     '''
@@ -13,8 +13,8 @@ def get_mask(outdir):
     x_coords = x_coords.reshape(-1, 1)
     stroke_coords = np.hstack([y_coords, x_coords])
     reference_frame = cv2.imread(os.path.join(outdir, 'reference_frame_anchor.jpg'))
-    feature_mask = (np.ones_like(reference_frame[:, :, 0])*255).astype(np.uint8)
-    feature_mask[y_coords, x_coords] = 0
+    feature_mask = (np.zeros_like(reference_frame[:, :, 0])*255).astype(np.uint8)
+    feature_mask[y_coords, x_coords] = 1
     return feature_mask
 
 """
@@ -23,8 +23,8 @@ Calculates the average pixel RGB value and saves the average image
 :param output:  string          output image path
 :return: numpy.ndarray lxwx3
 """
-def get_average_image(inputVid, output_dir):
-    vid = cv2.VideoCapture(inputVid)
+def get_average_image(input_path, output_path):
+    vid = cv2.VideoCapture(input_path)
     success, frame = vid.read()
     average = np.zeros(frame.shape)
     num_frames = 0
@@ -34,7 +34,8 @@ def get_average_image(inputVid, output_dir):
         average += frame.astype(np.float64)
         success, frame = vid.read()
     average = average / num_frames
-    cv2.imwrite(os.path.join(output_dir, inputVid.split("/")[-1].split("_")[0] + "_average.jpg"), average[:, :, [2,1,0]] * 255.0)
+    path = os.path.join(output_path, input_path.split("/")[-1].split("_")[0] + "_average.jpg")
+    cv2.imwrite(output_path, average[:, :, [2,1,0]] * 255.0)
     return average
 
 """
@@ -58,27 +59,44 @@ def get_variances(input, average, m):
         success, frame = vid.read()
     var_avg = var_avg / num_frames
     # var = np.ma.masked_array(var_avg, mask=m)
-    var = np.logical_and(var_avg, np.dstack([m, m, m]))
+    var = np.ma.masked_array(var_avg, mask=np.dstack([m, m, m]))
+    # var = np.logical_and(var_avg, np.dstack([m, m, m]))
     return num_frames, np.mean(var)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config", required=True, default="./config.yaml", 
+        "--config", required=True, default="./config.yaml",
         help="Path to config file")
-    
+
     args = parser.parse_args()
     with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
-    output_path = os.path.join(os.getcwd(), config['ioParams']['outputDir'], config['ioParams']['inputPath'].split("/")[-1].split(".")[0])
-    input_path = os.path.join(output_path, config['ioParams']['inputPath'].split("/")[-1].split(".")[0] + \
+    output_dir = os.path.join(os.getcwd(), config['ioParams']['outputDir'], config['ioParams']['inputPath'].split("/")[-1].split(".")[0])
+    print("OUTPUT PATH", output_dir)
+    input_path = os.path.join(output_dir, config['ioParams']['inputPath'].split("/")[-1].split(".")[0] + \
                     "_floating_texture_mapped." + config['ioParams']['inputPath'].split("/")[-1].split(".")[-1])
-    mask = get_mask(output_path).astype(bool)
-    average = get_average_image(input_path, output_path)
-    # mask = np.zeros((1080, 1920, 3), dtype=bool)
-    num_frames, var = get_variances(input_path, average, mask)    
+    print("INPUT PATH", input_path)
+
+    original_input = os.path.join(os.getcwd(), config['ioParams']['inputPath'][2:])
+    deanimated_input = os.path.join(output_dir, config['ioParams']['inputPath'].split("/")[-1].split(".")[0] + \
+                    "_floating_texture_mapped." + config['ioParams']['inputPath'].split("/")[-1].split(".")[-1])
+
+    original_output = os.path.join(output_dir, original_input.split("/")[-1].split("_")[0] + "_og_average.jpg")
+    deanimated_output = os.path.join(output_dir, deanimated_input.split("/")[-1].split("_")[0] + "_de_average.jpg")
+
+    mask = get_mask(output_dir).astype(bool)
+    og_average = get_average_image(original_input, original_output)
+    de_average = get_average_image(deanimated_input, deanimated_output)
+
+    # print(og_average.shape)
+    # print(get_mask(output_dir).shape)
+    # mask = np.zeros(og_average.shape, dtype=bool)
+    num_frames, og_var = get_variances(original_input, og_average, mask)
+    num_frames, de_var = get_variances(deanimated_input, de_average, mask)
     print("# of Frames:", num_frames)
-    print("Input RGB Variance:", var)
+    print("Original Video RGB Variance:", og_var)
+    print("Deanimated Video RGB Variance:", de_var)
 
 if __name__ == '__main__':
     main()
