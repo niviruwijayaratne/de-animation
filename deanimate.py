@@ -21,6 +21,7 @@ class LeastSquaresSolver:
         self.weights_and_verts = {"anchor": None, "floating": None}
         self.non_solved_verts = {"anchor": None, "floating": None}
         self.processed_quads = None
+        self.quad_positions = None
         self.temporal_weight_mat = {"anchor": None, "floating": None}
         
     def pre_process(self):
@@ -54,6 +55,18 @@ class LeastSquaresSolver:
             self.processed_quads *= 2
             self.processed_quads[np.arange(1, self.processed_quads.shape[0] + 1, 2)] += 1
             self.processed_quads = self.processed_quads.astype(np.int64)
+            
+
+            self.quad_positions = self.tracker.quad_positions
+            assert(self.quad_positions.shape == (65*33, 4))
+            self.quad_positions = np.tile(self.quad_positions, (num_t, 1))
+            for i in range(0, self.quad_positions.shape[0], 65*33):
+                print(int(i/(65*33)))
+                self.quad_positions[i:(65*33)*(int(i/(65*33)) + 1), :] += (2048)*(int(i/(65*33)))
+            self.quad_positions = np.repeat(self.quad_positions, 2, axis = 0)
+            assert(self.quad_positions.shape == (65*33*2*num_t, 4))
+            self.quad_positions *= 2
+            self.quad_positions[np.arange(1, self.quad_positions.shape[0] + 1, 2)] += 1
 
             self.vertices = vertices.reshape(-1, 1)
             assert(self.vertices.shape == (65*33*2, 1))
@@ -85,11 +98,13 @@ class LeastSquaresSolver:
 
         self.non_solved_verts[mode] = []
         vers = np.arange(0, self.vertices.shape[0], 1)
-        reshaped_idxs = np.unique(self.weights_and_verts[mode][:, 1, :].reshape(-1, 1), axis=0)
+        reshaped_idxs = np.squeeze(np.unique(self.weights_and_verts[mode][:, 1, :].reshape(-1, 1), axis=0))
+        print("Here")
         for v in vers:
             if v not in reshaped_idxs:
                 self.non_solved_verts[mode].append(v)
-        self.non_solved_verts[mode] = np.array(self.non_solved_verts[mode]).reshape(-1, 1)
+        
+        self.non_solved_verts[mode] = np.array(sorted(self.non_solved_verts[mode])).reshape(-1, 1)
         if mode == "floating":
             self.non_solved_verts["floating"] = np.intersect1d(self.non_solved_verts["anchor"], self.non_solved_verts["floating"]).reshape(-1, 1)
         
@@ -116,24 +131,24 @@ class LeastSquaresSolver:
         else:
             ea_rows = self.ka["anchor"].shape[0] + self.non_solved_verts["floating"].shape[0] + self.weights_and_verts["floating"].shape[0]
 
-        es_rows = 64*32*8*2*num_t_a
+        es_rows = ((4*2) + ((65 - 2)*2)*4 + ((33 - 2)*2)*4 + ((65*33) - (65 + 65  + 31 + 31))*8)*2*num_t_a
         ka_final = np.zeros((ea_rows+es_rows, 1))
         ka_final[:self.ka["anchor"].shape[0]] = np.multiply(self.ka["anchor"], np.sqrt(self.temporal_weight_mat["anchor"]))
         A = scipy.sparse.lil_matrix((ea_rows + es_rows, len(self.vertices)))
         
         print('\r' + "Setting up Least Squares...", end = "")
         idxs = np.arange(0, self.weights_and_verts["anchor"].shape[0], 1).reshape(-1, 1)
-        vert_idxs = np.squeeze(self.weights_and_verts["anchor"][idxs, 1].astype(np.int64))
-        weights = np.squeeze(self.weights_and_verts["anchor"][idxs, 0])
+        vert_idxs = np.squeeze(self.weights_and_verts["anchor"][:, 1].astype(np.int64))
+        weights = np.squeeze(self.weights_and_verts["anchor"][:, 0])
         A[idxs, vert_idxs] = np.multiply(weights, np.sqrt(self.temporal_weight_mat["anchor"]))
-        
-        # print("Started NSV Equations")
+
         idxs = np.arange(self.weights_and_verts["anchor"].shape[0], self.non_solved_verts[mode].shape[0] + self.weights_and_verts["anchor"].shape[0], 1).reshape(-1, 1)
         A[idxs, self.non_solved_verts[mode]] = 1
         ka_final[idxs] = self.vertices[self.non_solved_verts[mode]]
 
+
         if mode == "floating":
-            # print("Starting E_f Equations")
+            print("Starting E_f Equations")
             curr_idx = self.non_solved_verts[mode].shape[0] + self.weights_and_verts["anchor"].shape[0]
             idxs = np.arange(curr_idx, curr_idx + self.weights_and_verts["floating"].shape[0], 1).reshape(-1, 1, 1)
             vert_idxs = np.squeeze(self.weights_and_verts["floating"][idxs - curr_idx, [1, 3]]).reshape(-1, 8)
@@ -144,25 +159,64 @@ class LeastSquaresSolver:
             idxs = idxs.reshape(-1, 1)
             A[idxs, vert_idxs] = weights
 
-        
         # print("Started E_s Equations")
         ea_offset = ea_rows
+        coeffs = np.array([1, -1, -1, 1])
+        opposites = {0:3, 1:2, 2:1, 3:0}
+        remaining = {0: [1, 2], 1: [0, 3], 2: [0, 3], 3: [1, 2]}
+        added = 0
+        for i in range(0, self.quad_positions.shape[0], 2): #preprocess quad_positions same as processed quads ie. repeat it num_frames times and change indices accordingly
+            y_quad_list = self.quad_positions[i]
+            x_quad_list = self.quad_positions[i + 1]
+            curr_index = 0
+            for y_quad, x_quad in zip(y_quad_list, x_quad_list):
+                if y_quad == float('inf') or x_quad == float('inf'):
+                    curr_index += 1
+                    continue
+                else:
+                    y_quad = int(y_quad)
+                    x_quad = int(x_quad)
+                    y_vertex_of_interest = self.processed_quads[y_quad, curr_index]
+                    x_vertex_of_interest = self.processed_quads[x_quad, curr_index]
+                    opposite_vertex_y = self.processed_quads[y_quad, opposites[curr_index]]
+                    opposite_vertex_x = self.processed_quads[x_quad, opposites[curr_index]]
 
-        es_idxs_y = (np.arange(0, es_rows, 16)/8).astype(np.int64).reshape(-1, 1)
-        es_idxs_x = es_idxs_y + 1
-        quads_y = np.squeeze(self.processed_quads[es_idxs_y])
-        quads_x = np.squeeze(self.processed_quads[es_idxs_x])
-        y1, y2, y3, y4 = quads_y[:, 0].reshape(-1, 1), quads_y[:, 1].reshape(-1, 1), quads_y[:, 2].reshape(-1, 1), quads_y[:, 3].reshape(-1, 1)
-        x1, x2, x3, x4 = quads_x[:, 0].reshape(-1, 1), quads_x[:, 1].reshape(-1, 1), quads_x[:, 2].reshape(-1, 1), quads_x[:, 3].reshape(-1, 1)
+                    remaining_1_y = self.processed_quads[y_quad, remaining[curr_index][0]]
+                    remaining_2_y = self.processed_quads[y_quad, remaining[curr_index][1]]
+
+                    remaining_1_x = self.processed_quads[x_quad, remaining[curr_index][0]]
+                    remaining_2_x = self.processed_quads[x_quad, remaining[curr_index][1]]
+                    
+                    y_idxs_1 = np.array([y_vertex_of_interest, remaining_1_y, opposite_vertex_x, remaining_1_x])
+                    y_idxs_2 = np.array([y_vertex_of_interest, remaining_2_y, opposite_vertex_x, remaining_2_x])
+
+                    x_idxs_1 = np.array([x_vertex_of_interest, remaining_1_x, remaining_1_y, opposite_vertex_y])
+                    x_idxs_2 = np.array([x_vertex_of_interest, remaining_2_x, remaining_2_y, opposite_vertex_y])
+
+                    idxs = [y_idxs_1, y_idxs_2, x_idxs_1, x_idxs_2]
+                    for idx in idxs:
+                        A[ea_offset + added, idx] = coeffs*np.sqrt(4)/np.sqrt(8)
+                        added += 1
+                    curr_index += 1
+
+
+
+        # es_idxs_y = (np.arange(0, es_rows, 16)/8).astype(np.int64).reshape(-1, 1)
+        # es_idxs_x = es_idxs_y + 1
+        # quads_y = np.squeeze(self.processed_quads[es_idxs_y])
+        # quads_x = np.squeeze(self.processed_quads[es_idxs_x])
+        # y1, y2, y3, y4 = quads_y[:, 0].reshape(-1, 1), quads_y[:, 1].reshape(-1, 1), quads_y[:, 2].reshape(-1, 1), quads_y[:, 3].reshape(-1, 1)
+        # x1, x2, x3, x4 = quads_x[:, 0].reshape(-1, 1), quads_x[:, 1].reshape(-1, 1), quads_x[:, 2].reshape(-1, 1), quads_x[:, 3].reshape(-1, 1)
         
-        combos_x = np.array([np.hstack([x1, x2, x4]), np.hstack([x4, x2, x1]), np.hstack([x1, x3, x4]), np.hstack([x4, x3, x1]), np.hstack([x2, x1, x3]), np.hstack([x3, x1, x2]), np.hstack([x2, x4, x3]), np.hstack([x3, x4, x2])]).astype(np.int64)
-        combos_y = np.array([np.hstack([y1, y2, y4]), np.hstack([y4, y2, y1]), np.hstack([y1, y3, y4]), np.hstack([y4, y3, y1]), np.hstack([y2, y1, y3]), np.hstack([y3, y1, y2]), np.hstack([y2, y4, y3]), np.hstack([y3, y4, y2])]).astype(np.int64)
-        x_idxs = np.hstack([combos_x[:, :, 0].reshape(-1, 1), combos_x[:, :, 1].reshape(-1, 1), combos_y[:, :, 2].reshape(-1, 1), combos_y[:, :, 1].reshape(-1, 1)])
-        y_idxs = np.hstack([combos_y[:, :, 0].reshape(-1, 1), combos_y[:, :, 1].reshape(-1, 1), combos_x[:, :, 1].reshape(-1, 1), combos_x[:, :, 2].reshape(-1, 1)])
-        y_js = (np.arange(0, es_rows, 2) + ea_offset).reshape(-1, 1)
-        x_js = y_js + 1
-        A[y_js, y_idxs] = np.array([1, -1, -1, 1])*np.sqrt(4)/np.sqrt(8)
-        A[x_js, x_idxs] = np.array([1, -1, -1, 1])*np.sqrt(4)/np.sqrt(8)
+        # combos_x = np.array([np.hstack([x1, x2, x4]), np.hstack([x4, x2, x1]), np.hstack([x1, x3, x4]), np.hstack([x4, x3, x1]), np.hstack([x2, x1, x3]), np.hstack([x3, x1, x2]), np.hstack([x2, x4, x3]), np.hstack([x3, x4, x2])]).astype(np.int64)
+        # combos_y = np.array([np.hstack([y1, y2, y4]), np.hstack([y4, y2, y1]), np.hstack([y1, y3, y4]), np.hstack([y4, y3, y1]), np.hstack([y2, y1, y3]), np.hstack([y3, y1, y2]), np.hstack([y2, y4, y3]), np.hstack([y3, y4, y2])]).astype(np.int64)
+        # x_idxs = np.hstack([combos_x[:, :, 0].reshape(-1, 1), combos_x[:, :, 1].reshape(-1, 1), combos_y[:, :, 2].reshape(-1, 1), combos_y[:, :, 1].reshape(-1, 1)])
+        # y_idxs = np.hstack([combos_y[:, :, 0].reshape(-1, 1), combos_y[:, :, 1].reshape(-1, 1), combos_x[:, :, 1].reshape(-1, 1), combos_x[:, :, 2].reshape(-1, 1)])
+        # y_js = (np.arange(0, es_rows, 2) + ea_offset).reshape(-1, 1)
+        # x_js = y_js + 1
+        # A[y_js, y_idxs] = np.array([1, -1, -1, 1])*np.sqrt(4)/np.sqrt(8)
+        # A[x_js, x_idxs] = np.array([1, -1, -1, 1])*np.sqrt(4)/np.sqrt(8)
+
         print("Set Up!")
 
         print('\r' + "Solving for Mesh...", end = "")
@@ -171,20 +225,25 @@ class LeastSquaresSolver:
         v_prime = v_prime[0]
         z = 0
         for i in range(0, len(v_prime), 2):
-            if v_prime[i] <= 0:
+            if v_prime[i] < 0:
+                # print(v_prime[i], i)
                 z += 1
-            if v_prime[i + 1] <= 0:
+            if v_prime[i + 1] < 0:
+                # print(v_prime[i], i)
                 z += 1
             if v_prime[i] > self.tracker.reference_frame.shape[0]:
+                # print(v_prime[i], i)
                 z += 1
             if v_prime[i + 1] > self.tracker.reference_frame.shape[1]:
+                # print(v_prime[i], i)
                 z += 1
             if np.isnan(v_prime[i]) or v_prime[i] is None:
                 z += 1
             if np.isnan(v_prime[i + 1]) or v_prime[i + 1] is None:
                 z += 1
-        
+        print(self.tracker.reference_frame.shape)
         print(str(100 - (z/len(v_prime)*100)) + "% Valid Points")
+        # sys.exit()
         return v_prime
 
     def get_temporal_weights(self):
@@ -215,6 +274,15 @@ class LeastSquaresSolver:
                         self.temporal_weight_mat[mode][s_i, t_i] = 1
                     else:
                         self.temporal_weight_mat[mode][s_i, t_i] = ((t_end - t_i) / T)
+
+    def check_bounds(self, point, upper_bound):
+        if point < 0:
+            point = 0
+        elif point > upper_bound:
+            point = upper_bound
+        else:
+            return point
+        return point
 
     def draw_rectangles(self, v_prime):
         '''
@@ -254,6 +322,20 @@ class LeastSquaresSolver:
                 y_br = int(np.rint(y_br))
                 x_br = int(np.rint(x_br))
 
+
+                y_tl = self.check_bounds(y_tl, frame.shape[0])
+                x_tl = self.check_bounds(x_tl, frame.shape[1])
+
+                y_tr = self.check_bounds(y_tr, frame.shape[0])
+                x_tr = self.check_bounds(x_tr, frame.shape[1])
+
+                y_bl = self.check_bounds(y_bl, frame.shape[0])
+                x_bl = self.check_bounds(x_bl, frame.shape[1])
+
+                y_br = self.check_bounds(y_br, frame.shape[0])
+                x_br = self.check_bounds(x_br, frame.shape[1])
+                
+
                 cv2.line(frame, (x_tl, y_tl), (x_tr, y_tr), (255, 0, 0), 1)
                 cv2.line(frame, (x_tr, y_tr), (x_br, y_br), (255, 0, 0), 1)
                 cv2.line(frame, (x_br, y_br), (x_bl, y_bl), (255, 0, 0), 1)
@@ -278,6 +360,7 @@ class LeastSquaresSolver:
                     # f = cv2.imread('inputs/reference_frame.jpg')
         vid.release()
         writer.release()
+        # sys.exit()
 
     def texture_map(self, v_prime):
         '''
@@ -465,9 +548,8 @@ class LeastSquaresSolver:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config", required=True, default="./config.yaml", 
+        "--config", required=False, default="./config.yaml", 
         help="Path to config file")
-    
     args = parser.parse_args()
     with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)

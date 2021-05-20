@@ -1,7 +1,7 @@
 ioParams:
   inputPath: ./inputs/bai_guitar.mp4
   outputDir: outputs
-  maxFrames: 25 # -1 if processing entire video, 
+  maxFrames: 50 # -1 if processing entire video, 
 
 featureParams:
   maxCorners: 1000

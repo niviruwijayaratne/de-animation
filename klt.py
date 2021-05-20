@@ -29,6 +29,7 @@ class Tracker():
         self.solved_quad_indices = {"anchor": None, "floating": None}
         self.weights_and_verts = {"anchor": None, "floating": None}
         self.feature_mask = None
+        self.quad_positions = None
         
     def draw_corners(self, img: np.ndarray, corners: np.ndarray):
         '''
@@ -128,28 +129,32 @@ class Tracker():
         self.quads[count_steps] = np.squeeze(self.vertices[y_steps_final, x_steps_final]).reshape(-1, 4, 2)
 
     def construct_quad_dict(self):
-        '''
-        Returns dict()
-        key: tuple(y, x pair)
-        value: int that gives index in quads to the quad that key is in the top left corner
-        Constructs dictionary where a key is a quad vertex and its corresponding value is an 
-        index in self.quads that gives the quad of which the vertex is the top left vertex.
+        # '''
+        # Returns dict()
+        # key: tuple(y, x pair)
+        # value: int that gives index in quads to the quad that key is in the top left corner
+        # Constructs dictionary where a key is a quad vertex and its corresponding value is an 
+        # index in self.quads that gives the quad of which the vertex is the top left vertex.
 
-        '''
+        # '''
+        counter = 0
         for row in self.vertices:
             for pair in row:
                 for i, quad in enumerate(self.quads):
                     eq = (pair == quad).all(axis=1)
                     if eq.any():
-                        if int(np.where(eq)[0]) != 0:
-                            continue
-                        elif tuple(pair) not in self.quad_dict:
-                            self.quad_dict[tuple(pair)] = 0
-                            self.quad_dict[tuple(pair)] = i
+                        counter += 1
+                        # if int(np.where(eq)[0]) != 0:
+                        #     continue
+                        if tuple(pair) not in self.quad_dict:
+                            self.quad_dict[tuple(pair)] = [float('inf')]*4
+                            self.quad_dict[tuple(pair)][int(np.where(eq)[0])] = i
                         else:
-                            self.quad_dict[tuple(pair)] = i
-                                 
-
+                            self.quad_dict[tuple(pair)][int(np.where(eq)[0])] = i
+        #np array version of self.quad_dict where each row corresponds to the vertex at that index in self.vertices if self.vertices was (65*33 x 4)        
+        self.quad_positions = np.array(list(self.quad_dict.values()))
+        
+        
     def search_quads(self): 
         '''
         Returns # of frames x # of features ndarray where each row gives the list of quads that 
@@ -164,7 +169,7 @@ class Tracker():
         for i, row in enumerate(top_left):
             for j, point in enumerate(row):
                 if tuple(point) in self.quad_dict.keys():
-                    self.solved_quad_indices[self.mode][i, j] = self.quad_dict[tuple(point)]
+                    self.solved_quad_indices[self.mode][i, j] = self.quad_dict[tuple(point)][0]
 
     def get_weights(self):
         '''
@@ -193,7 +198,7 @@ class Tracker():
                 for vertex in quad_vertices:
                     solved_vertices.append(int(np.where((vertices == vertex).all(axis=1))[0]) + frame_adder)
                 self.weights_and_verts[self.mode][i, j, :, :] = np.array([weights, solved_vertices])
-                
+
     def get_quad_weights(self, feature_point, quad_vertices):
         '''
         Helper function to calculate the bilinear interpolation weights of each vertex
