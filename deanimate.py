@@ -11,6 +11,7 @@ import time
 import os
 import tqdm
 from user_input import StrokeCanvas
+import random
 
 
 class LeastSquaresSolver:
@@ -321,16 +322,42 @@ class LeastSquaresSolver:
                 dst = np.array([[y_tl, x_tl], [y_tr, x_tr], [y_bl, x_bl], [y_br, x_br]])
                 src = np.array([[y_tl_o, x_tl_o], [y_tr_o, x_tr_o], [y_bl_o, x_bl_o], [y_br_o, x_br_o]])
                 transform = self.get_transform(src, dst)
-                # bounds = self.get_pixels(dst)
-                for y in range(int(np.rint(y_tl)), int(np.rint(y_bl))):
-                    for x in range(int(np.rint(x_tl)), int(np.rint(x_tr))):
-                        transformed_point = np.dot(transform, np.array([y, x, 1]))
-                        transformed_point /= transformed_point[-1]
-                        transformed_point[np.where(transformed_point < 0)] = 0
-                        transformed_point[0] = min(transformed_point[0], frame.shape[0] - 1)
-                        transformed_point[1] = min(transformed_point[1], frame.shape[1] - 1)
-                        intensity = frame[int(transformed_point[0]), int(transformed_point[1]), :] 
-                        warped_frame[y, x, :] = intensity
+                bounds = self.get_pixels(dst)
+                M = None
+                M1 = cv2.getAffineTransform(src[:3].astype(np.float32), dst[:3].astype(np.float32))
+                M2 = cv2.getAffineTransform(src[1:].astype(np.float32), dst[1:].astype(np.float32))
+            
+                for j in range(2):
+                    name = "tri" + str(j + 1)
+                    if j == 0:
+                        M = np.vstack([M1, np.array([0, 0, 1]).reshape(-1, 3)])
+                        M = np.linalg.inv(M)
+                    else:
+                        M = np.vstack([M2, np.array([0, 0, 1]).reshape(-1, 3)])
+                        M = np.linalg.inv(M)
+                    for y in bounds[name]:
+                        for x in range(bounds[name][y][0], bounds[name][y][1] + 1):
+                            transformed_point = np.dot(M, np.array([y, x, 1]))
+                            # transformed_point /= transformed_point[-1]
+                            # print([y,x], transformed_point[:-1], "\n")
+                            # print([y, x], "\n")
+                            # transformed_point[np.where(transformed_point < 0)] = 0
+                            # print(transformed_point, frame.shape)
+                            if np.rint(transformed_point[0]) >= frame.shape[0] - 1:
+                                # print("Y", transformed_point[0], frame.shape[0])
+                                transformed_point[0] = frame.shape[0] - 1
+                            if np.rint(transformed_point[0]) < 0:
+                                # print([y, x], transformed_point)
+                                transformed_point[0] = 0
+                            
+                            if np.rint(transformed_point[1]) >= frame.shape[1] - 1:
+                                # print("X", transformed_point[1], frame.shape[1])
+                                transformed_point[1] = frame.shape[1] - 1
+                            if np.rint(transformed_point[1]) < 0:
+                                transformed_point[1] = 0
+
+                            intensity = frame[int(np.rint(transformed_point[0])), int(np.rint(transformed_point[1])), :] 
+                            warped_frame[y, x, :] = intensity
                 if (i + 2) % (64*32*2) == 0:
                     # print("Writing Frame: ", counter)
                     pbar.update(1)
@@ -344,57 +371,59 @@ class LeastSquaresSolver:
                         return
         writer.release()
         vid.release()
+        sys.exit()
 
     def get_pixels(self, points):
         '''
         Scan conversion for correctly traversing quad pixels.
         '''
-        points = np.squeeze(points)
-        tri1 = np.array([points[0], points[1], points[2]])
-        tri2 = np.array([points[1], points[2], points[3]])
 
-        pairs1 = np.array([[tri1[1], tri1[0]], [tri1[1], tri1[2]]])
-        pairs2 = np.array([[tri1[0], tri1[1]], [tri1[0], tri1[2]]])
-        edges = [pairs1, pairs2]
-        bounds = {}
-        for edge in edges:
-            dxl = edge[0, 0, 0] - edge[0, 1, 0]
-            dyl = edge[0, 0, 1] - edge[0, 1, 1]
-            slope_l = dyl/dxl
-            intercept_l = edge[0, 0, 1] - edge[0, 0, 0]*slope_l
-            l_val = lambda y: (y - intercept_l)/slope_l
+        canvas = np.zeros_like(self.tracker.reference_frame)
+        points = np.flip(np.squeeze(points), axis=1)
+        tl = points[0]
+        tr = points[1]
+        bl = points[2]
+        br = points[3]
 
-            dxr = edge[1, 0, 0] - edge[1, 1, 0]
-            dyr = edge[1, 0, 1] - edge[1, 1, 1]
-            slope_r = dyr/dxr
-            intercept_r = edge[1, 0, 1] - edge[1, 0, 0]*slope_r
-            r_val = lambda y: (y - intercept_r)/slope_r
+        bounds = {"tri1": {}, "tri2": {}}
+        pair1 = sorted([tl, tr], key=lambda x: x[1])
+        pair2 = sorted([tr, bl], key=lambda x: x[1])
+        pair3 = sorted([bl, tl], key=lambda x: x[1])
+        pair4 = sorted([tr, br], key=lambda x: x[1])
+        pair5 = sorted([br, bl], key=lambda x: x[1])
+        tris = [[pair1, pair2, pair3], [pair2, pair4, pair5]]
+        # lines = np.array([pair1, pair2, pair3, pair4, pair5])
+        for i, lines in enumerate(tris):
+            name = "tri" + str(i + 1)
+            for line in lines:
+                x1, y1 = line[0][0], line[0][1]
+                x2, y2 = line[1][0], line[1][1]
 
-            max_y = -float('inf')
-            min_y = float('inf')
-            for pair in edge:
-                for point in pair:
-                    if point[0] < min_y:
-                        min_y = point[0]
-                    if point[0] > max_y:
-                        max_y = point[0]
-            
-            for y in range(int(np.ceil(min_y)), int(np.floor(max_y))):
-                curr_x = l_val(y)
-                if y in bounds:
-                    bounds[y].append(curr_x)
+                dx = x2 - x1
+                dy = y2 - y1
+                grad = dx/dy
+                ey = int(y1 + 1) - y1
+                ex = grad*ey
+                Ax = x1 + ex 
+                Ay = int(y1+1)
+                By = int(y2)
+
+                x = Ax
+                for y in range(Ay, By + 1):
+                    if y in list(bounds[name].keys()):
+                        bounds[name][y].append(int(x))
+                    else:
+                        bounds[name][y] = [int(x)]
+                    cv2.circle(canvas, (int(x), y), 5, (255, 0, 0), -1)
+                    x += grad
+            for k in bounds[name]:
+                if len(bounds[name][k]) == 1:
+                    bounds[name][k] = bounds[name][k]*2
                 else:
-                    bounds[y] = [curr_x]
-                while curr_x <= r_val(y):
-                    curr_x += np.abs(slope_l)
-                    # break
-                bounds[y].append(curr_x)
-
-        for k in bounds.keys():
-            bounds[k] = [int(max(min(bounds[k]), 0)), int(max(bounds[k]))]
+                    bounds[name][k] = [min(bounds[name][k]), max(bounds[name][k])]
+            bounds[name] = dict(sorted(bounds[name].items(), key=lambda item: item[0]))
         
         return bounds
-
 
     def get_transform(self, src, dst):
         '''
@@ -405,35 +434,33 @@ class LeastSquaresSolver:
         src = np.hstack([src, np.ones((src.shape[0], 1))])
         dst = np.hstack([dst, np.ones((dst.shape[0], 1))])
 
-        src_consts = np.dot(np.linalg.inv(src.T[:, :-1]), src.T[:, -1]).reshape(1, -1)
-        A = src.T[:, :-1]*src_consts
+        a_s = src[2]
+        a_d = dst[2]
 
-        dst_consts = np.dot(np.linalg.inv(dst.T[:, :-1]), dst.T[:, -1]).reshape(1, -1)
-        B = dst.T[:, :-1]*dst_consts
+        b_s = src[3]
+        b_d = dst[3]
 
-        T = np.dot(B, np.linalg.inv(A))
-        T_inv = np.linalg.inv(T)
+        c_s = src[0]
+        c_d = dst[0]
 
-        return T_inv
+        d_s = src[1]
+        d_d = dst[1]
 
-    # def get_transform(self, src, dst):
-    #     '''
-    #     Helper function to calculate quad-to-quad transforms for texture mapping.
-    #     '''
-    #     A = np.zeros((src.shape[0]*2, 9))
-    #     for i in range(0, A.shape[0], 2):
-    #         u, v = np.squeeze(src[int(i/2)])
-    #         u_, v_ = np.squeeze(dst[int(i/2)])
+        H1 = np.cross(np.cross(b_s, a_s), np.cross(c_s, d_s)).reshape(3, -1)
+        H2 = np.cross(np.cross(a_s, d_s), np.cross(b_s, c_s)).reshape(3, -1)
+        H3 = np.cross(np.cross(a_s, c_s), np.cross(b_s, d_s)).reshape(3, -1)
 
-    #         A[i] = [-u, -v, -1, 0, 0, 0, u*u_, v*u_, u_]
-    #         A[i + 1] = [0, 0, 0, -u, -v, -1, u*v_, v*v_, v_]
+        H = np.hstack([H1, H2, H3])
 
-    #     U,S,V_t = scipy.linalg.svd(A)
-    #     T = V_t[-1]
-    #     T = T.reshape((3,3))
-    #     T_inv = np.linalg.inv(T)
-    #     return T_inv
-        
+        h1 = np.cross(np.cross(b_d, a_d), np.cross(c_d, d_d)).reshape(3, -1)
+        h2 = np.cross(np.cross(a_d, d_d), np.cross(b_d, c_d)).reshape(3, -1)
+        h3 = np.cross(np.cross(a_d, c_d), np.cross(b_d, d_d)).reshape(3, -1)
+
+        h = np.hstack([h1, h2, h3])
+
+        M = np.linalg.inv(np.dot(h, np.linalg.inv(H)))
+        return np.linalg.inv(h)
+
     def run(self):
         '''
         Runs entire de-animation pipeline.
