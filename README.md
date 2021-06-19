@@ -1,6 +1,8 @@
 # De-Animation
 Implementation of "Selectively De-Animating Video" from SIGGRAPH 2012
 
+<img src="imgs/guitar_average_before.jpg">&nbsp;&nbsp;&nbsp;<img src="imgs/guitar_average_before.jpg">&nbsp;&nbsp;&nbsp;<img src="imgs/model_average_before.jpg">&nbsp;&nbsp;&nbsp;<img src="imgs/model_average_before.jpg">
+
 ## Requirements
 This code was developed on Python 3.7. Run `pip3 install -r requirements.txt` to install all dependencies
 
